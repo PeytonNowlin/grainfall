@@ -136,6 +136,15 @@
     { id: "circle", name: "Circle" },
     { id: "fill", name: "Fill" },
   ];
+  function selectTool(id) {
+    if (!TOOLS.some(function (t) { return t.id === id; })) return;
+    tool = id;
+    if (toolEl) {
+      Array.prototype.forEach.call(toolEl.querySelectorAll(".tool-btn"), function (b) {
+        b.classList.toggle("active", b.dataset.tool === tool);
+      });
+    }
+  }
   if (toolEl) {
     TOOLS.forEach(function (t) {
       var btn = document.createElement("button");
@@ -144,14 +153,13 @@
       btn.textContent = t.name;
       btn.dataset.tool = t.id;
       btn.addEventListener("click", function () {
-        tool = t.id;
-        Array.prototype.forEach.call(toolEl.querySelectorAll(".tool-btn"), function (b) {
-          b.classList.toggle("active", b.dataset.tool === tool);
-        });
+        selectTool(t.id);
       });
       toolEl.appendChild(btn);
     });
   }
+  // Letter hotkeys for tools: F/L/B/O/G.
+  var TOOL_KEYS = { f: "free", l: "line", b: "box", o: "circle", g: "fill" };
 
   // --- Speed slider ---
   if (speedEl) {
@@ -338,6 +346,9 @@
       savePNG();
       e.preventDefault();
     }
+    if (TOOL_KEYS[e.key.toLowerCase()]) {
+      selectTool(TOOL_KEYS[e.key.toLowerCase()]);
+    }
     var num = parseInt(e.key, 10);
     if (num >= 1 && num <= 9) {
       var item = M.PALETTE[num - 1];
@@ -457,14 +468,7 @@
     get tool() {
       return tool;
     },
-    setTool: function (t) {
-      tool = t;
-      if (toolEl) {
-        Array.prototype.forEach.call(toolEl.querySelectorAll(".tool-btn"), function (b) {
-          b.classList.toggle("active", b.dataset.tool === tool);
-        });
-      }
-    },
+    setTool: selectTool,
     get speed() {
       return speed;
     },
@@ -475,6 +479,6 @@
 
   if (hintEl) {
     hintEl.textContent =
-      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · ←/→ cycle materials · Space pause · C clear · S save PNG · 1–9 materials";
+      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · ←/→ cycle materials · F/L/B/O/G tools · Space pause · C clear · S save PNG · 1–9 materials";
   }
 })();
