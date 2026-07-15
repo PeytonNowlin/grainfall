@@ -24,14 +24,16 @@ npm start
 | Action | How |
 |--------|-----|
 | Paint | Click / drag on the canvas |
+| Erase | **Right-click / right-drag**, or select **Erase** and paint |
 | Straight line | Hold **Shift** while dragging |
-| Brush size | Sidebar slider, or scroll wheel over the canvas |
+| Pick material (eyedropper) | **Alt+click** a pixel to adopt its material |
+| Brush size | Sidebar slider, scroll wheel over the canvas, or `[` / `]` |
 | Simulation speed | Sidebar **Speed** slider |
-| Material | Click the palette, or keys `1`–`9` for the first nine |
-| Tools | Free, Line, Box, Circle, Fill |
-| Erase | Select **Erase**, then paint |
+| Material | Click the palette, keys `1`–`9` for the first nine, or `←` / `→` to cycle all |
+| Tools | Free, Line, Box, Circle, Fill — or keys `F` / `L` / `B` / `O` / `G` |
 | Pause | **Pause** button or `Space` |
 | Clear | **Clear** button or `C` |
+| Save PNG | **Save PNG** button or `S` |
 
 ### Materials
 
