@@ -234,6 +234,13 @@ body {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
+/* Tactile press feedback (drives the existing transform transition). */
+.mat-btn:active,
+.tool-btn:active,
+.btn:active {
+  transform: translateY(1px);
+}
+
 .swatch {
   width: 16px;
   height: 16px;
@@ -398,4 +405,14 @@ body {
 
 .app-footer a:hover {
   text-decoration: underline;
+}
+
+/* Respect users who prefer minimal motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
