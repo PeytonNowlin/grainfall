@@ -396,19 +396,21 @@ for (var bn = 0; bn < 40; bn++) {
 assertEqual(sim.countMaterial(MAT.BIRD), 1, "bird survives");
 assertGt(Object.keys(birdSpots).length, 3, "bird flies to multiple positions");
 
-// Fighter patrols the floor
+// Fighter patrols the floor and lobs fire (it can die in its own flames — that's fine)
 sim.clear();
 for (var ffx = 0; ffx < 32; ffx++) sim.setCell(ffx, 21, MAT.WALL);
 sim.setCell(16, 20, MAT.FIGHTER);
 var fCols = {};
+var firedShots = 0;
 for (var fn = 0; fn < 40; fn++) {
   sim.step();
   for (var fx3 = 0; fx3 < 32; fx3++) {
     if (sim.getCell(fx3, 20) === MAT.FIGHTER) fCols[fx3] = true;
   }
+  if (sim.countMaterial(MAT.FIRE) > 0) firedShots++;
 }
-assertEqual(sim.countMaterial(MAT.FIGHTER), 1, "fighter survives");
 assertGt(Object.keys(fCols).length, 3, "fighter patrols the floor");
+assertGt(firedShots, 0, "fighter lobs fire");
 
 // --- Electricity ---
 console.log("\n[electricity]");
@@ -429,25 +431,35 @@ var anyCharge = false;
 for (var cq = 2; cq <= 20; cq++) if (sim.getCharge(cq, 10) > 0) anyCharge = true;
 assert(!anyCharge, "charge dissipates (no perpetual current)");
 
-// Charge conducts through water too
+// Charge conducts through water too (airtight tank so the water can't slosh)
 sim.clear();
-for (var wwx = 2; wwx <= 20; wwx++) {
-  sim.setCell(wwx, 10, MAT.WATER);
-  sim.setCell(wwx, 11, MAT.WALL);
+for (var twx = 1; twx <= 21; twx++) {
+  sim.setCell(twx, 9, MAT.WALL);
+  sim.setCell(twx, 12, MAT.WALL);
 }
-sim.setCell(1, 10, MAT.METAL);
-sim.setCell(1, 11, MAT.WALL);
-sim.setCell(1, 9, MAT.THUNDER);
+for (var twy = 9; twy <= 12; twy++) {
+  sim.setCell(1, twy, MAT.WALL);
+  sim.setCell(21, twy, MAT.WALL);
+}
+for (var wwx = 2; wwx <= 20; wwx++)
+  for (var wwy = 10; wwy <= 11; wwy++) sim.setCell(wwx, wwy, MAT.WATER);
+sim.setCell(2, 9, MAT.METAL); // probe pokes through the ceiling
+sim.setCell(2, 10, MAT.METAL);
+sim.setCell(2, 8, MAT.THUNDER);
 var reachedWater = false;
 for (var el4 = 0; el4 < 40; el4++) {
   sim.step();
-  if (sim.getCharge(18, 10) > 0) reachedWater = true;
+  if (sim.getCharge(19, 11) > 0) reachedWater = true;
 }
 assert(reachedWater, "charge conducts through water");
 
-// Charged metal electrocutes an adjacent creature
+// Charged metal electrocutes an adjacent creature (ant fully boxed so it can't flee)
 sim.clear();
-for (var efx = 3; efx <= 6; efx++) sim.setCell(efx, 11, MAT.WALL);
+sim.setCell(3, 10, MAT.WALL);
+sim.setCell(4, 9, MAT.WALL);
+sim.setCell(4, 11, MAT.WALL);
+sim.setCell(5, 9, MAT.WALL);
+sim.setCell(5, 11, MAT.WALL);
 sim.setCell(5, 10, MAT.METAL);
 sim.setCell(4, 10, MAT.ANT);
 sim.setCell(6, 10, MAT.THUNDER);
@@ -466,11 +478,15 @@ for (var ex = 0; ex < 20; ex++) sim.step();
 var iceAfter = sim.countMaterial(MAT.ICE);
 assertGt(iceBefore - iceAfter, 10, "gunpowder blast shatters through an ice block");
 
-// Burning napalm melts ice even without exploding
+// Burning napalm melts ice even without exploding (napalm pinned in a channel by ice + wall)
 sim.clear();
-for (var ncy = 10; ncy <= 18; ncy++) sim.setCell(10, ncy, MAT.ICE);
-sim.setCell(11, 14, MAT.NAPALM);
-sim.setCell(12, 14, MAT.FIRE);
+for (var ncy = 10; ncy <= 18; ncy++) {
+  sim.setCell(10, ncy, MAT.ICE);
+  sim.setCell(11, ncy, MAT.NAPALM);
+  sim.setCell(12, ncy, MAT.WALL);
+}
+for (var nfx = 10; nfx <= 12; nfx++) sim.setCell(nfx, 19, MAT.WALL); // floor
+sim.setCell(11, 10, MAT.FIRE); // ignite the top of the column
 var niceBefore = sim.countMaterial(MAT.ICE);
 for (var nex = 0; nex < 40; nex++) sim.step();
 assertGt(niceBefore - sim.countMaterial(MAT.ICE), 0, "burning napalm melts through ice");

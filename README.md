@@ -2,13 +2,15 @@
 
 A browser falling-sand sandbox. Paint powders, fluids, fire, creatures, and oddities onto a particle grid — then watch gravity, reactions, wind, and electricity play out.
 
+**Play now:** [grainfall.vercel.app](https://grainfall.vercel.app/)
+
 Inspired by the falling-sand toys that flooded the early 2000s web. Original mechanics throughout.
 
 Runs fully offline. No build step, no bundler, no server required.
 
 ## Play
 
-Open `index.html` in a browser, or serve locally:
+Open [grainfall.vercel.app](https://grainfall.vercel.app/), open `index.html` in a browser, or serve locally:
 
 ```bash
 npm start
