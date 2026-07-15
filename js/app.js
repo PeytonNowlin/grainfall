@@ -184,6 +184,7 @@
   var lastPaint = null;
   var fanDir = 7; // 1..8 heading for painted fans; default blows up
   var shape = null; // active line/box/circle drag: {x0,y0,x1,y1,kind}
+  var cursor = null; // {x,y} grid coords of pointer, for the brush-ring preview
 
   function paintData() {
     return selected === MAT.FAN ? fanDir : undefined;
@@ -250,15 +251,18 @@
     }
   });
   canvas.addEventListener("pointermove", function (e) {
+    cursor = clientToGrid(e.clientX, e.clientY);
     if (painting) {
       paintAt(e.clientX, e.clientY);
       e.preventDefault();
     } else if (shape) {
-      var p = clientToGrid(e.clientX, e.clientY);
-      shape.x1 = p.x;
-      shape.y1 = p.y;
+      shape.x1 = cursor.x;
+      shape.y1 = cursor.y;
       e.preventDefault();
     }
+  });
+  canvas.addEventListener("pointerleave", function () {
+    cursor = null;
   });
   function endStroke() {
     painting = false;
@@ -340,6 +344,20 @@
     ctx.restore();
   }
 
+  // Ring showing brush position/size while hovering (not during a shape drag).
+  function drawCursor() {
+    if (!cursor || shape) return;
+    var c = M.colorFor(selected === MAT.EMPTY ? MAT.WALL : selected);
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(cursor.x + 0.5, cursor.y + 0.5, brushSize + 0.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // --- Main loop ---
   function frame() {
     if (!paused) {
@@ -356,6 +374,7 @@
     sim.renderTo(rgba);
     ctx.putImageData(imageData, 0, 0);
     drawPreview();
+    drawCursor();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
