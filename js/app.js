@@ -366,6 +366,12 @@
     if (TOOL_KEYS[e.key.toLowerCase()]) {
       selectTool(TOOL_KEYS[e.key.toLowerCase()]);
     }
+    // Brush resize from the keyboard (the scroll-wheel resize needs a mouse).
+    if (e.key === "[" || e.key === "]") {
+      brushSize = Math.max(0, Math.min(12, brushSize + (e.key === "]" ? 1 : -1)));
+      if (brushEl) brushEl.value = String(brushSize);
+      if (brushLabel) brushLabel.textContent = String(brushSize + 1);
+    }
     var num = parseInt(e.key, 10);
     if (num >= 1 && num <= 9) {
       var item = M.PALETTE[num - 1];
@@ -572,6 +578,6 @@
 
   if (hintEl) {
     hintEl.textContent =
-      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · Alt+click pick material · ←/→ cycle materials · F/L/B/O/G tools · Space pause · C clear · S save PNG · 1–9 materials";
+      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · Alt+click pick material · [ ] brush size · ←/→ cycle materials · F/L/B/O/G tools · Space pause · C clear · S save PNG · 1–9 materials";
   }
 })();
