@@ -456,8 +456,13 @@
     ctx.restore();
   }
 
+  // FPS meter: sampled once per ~500ms so the readout doesn't flicker.
+  var statsEl = document.getElementById("stats");
+  var fpsFrames = 0;
+  var fpsSince = 0;
+
   // --- Main loop ---
-  function frame() {
+  function frame(now) {
     if (!paused) {
       // Hold the pointer still to keep pouring
       if (painting && lastPaint) dab(lastPaint.x, lastPaint.y);
@@ -474,6 +479,15 @@
     drawPreview();
     drawCursor();
     drawPausedOverlay();
+    if (statsEl && now) {
+      fpsFrames++;
+      if (!fpsSince) fpsSince = now;
+      if (now - fpsSince >= 500) {
+        statsEl.textContent = Math.round((fpsFrames * 1000) / (now - fpsSince)) + " fps";
+        fpsFrames = 0;
+        fpsSince = now;
+      }
+    }
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

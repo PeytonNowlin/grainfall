@@ -389,6 +389,13 @@ body {
   line-height: 1.4;
 }
 
+#stats {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .app-footer {
   flex-shrink: 0;
   padding: 0.5rem 1.25rem 0.75rem;
