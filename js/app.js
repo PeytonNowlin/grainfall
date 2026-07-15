@@ -48,6 +48,7 @@
   var speedLabel = document.getElementById("speed-label");
   var clearBtn = document.getElementById("btn-clear");
   var pauseBtn = document.getElementById("btn-pause");
+  var saveBtn = document.getElementById("btn-save");
   var hintEl = document.getElementById("hint");
 
   if (!canvas || !paletteEl) {
@@ -177,6 +178,12 @@
   if (clearBtn) {
     clearBtn.addEventListener("click", function () {
       sim.clear();
+    });
+  }
+
+  if (saveBtn) {
+    saveBtn.addEventListener("click", function () {
+      savePNG();
     });
   }
 
