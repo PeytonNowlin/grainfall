@@ -1,0 +1,16 @@
+{
+  "name": "grainfall",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Grainfall — browser falling-sand sandbox",
+  "scripts": {
+    "test": "node tests/sim.test.js && node tests/script-load-check.js",
+    "test:unit": "node tests/sim.test.js",
+    "test:load": "node tests/script-load-check.js",
+    "test:browser": "node tests/browser-verify.mjs",
+    "start": "npx --yes serve -l 4173 ."
+  },
+  "devDependencies": {
+    "playwright": "^1.61.1"
+  }
+}

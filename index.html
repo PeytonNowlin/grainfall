@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Grainfall — a browser falling-sand sandbox. Paint sand, water, lava, napalm and more." />
+    <title>Grainfall</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <h1>Grainfall</h1>
+        <p class="tagline">Paint particles · gravity · fire &amp; water reactions</p>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="btn" id="btn-pause" aria-pressed="false">Pause</button>
+        <button type="button" class="btn btn-danger" id="btn-clear">Clear</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <div class="stage" id="stage">
+        <canvas id="sim-canvas" width="480" height="320" aria-label="Falling sand simulation canvas"></canvas>
+      </div>
+
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>Materials</h2>
+          <div id="palette" role="toolbar" aria-label="Material palette"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Tools</h2>
+          <div id="tools" class="tool-group" role="toolbar" aria-label="Draw tools"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Brush</h2>
+          <div class="control-row">
+            <label for="brush-size">Size</label>
+            <input type="range" id="brush-size" min="0" max="12" value="3" />
+            <span id="brush-label">4</span>
+          </div>
+          <div class="control-row">
+            <label for="speed">Speed</label>
+            <input type="range" id="speed" min="0" max="4" value="2" />
+            <span id="speed-label">1×</span>
+          </div>
+          <p id="hint">Click &amp; drag to paint · Space pause · C clear</p>
+        </section>
+      </aside>
+    </main>
+
+    <footer class="app-footer">
+      Grainfall — a browser sandbox inspired by early-2000s falling-sand toys. Runs fully offline via plain scripts.
+    </footer>
+
+    <!-- Plain script tags: works from file:// and any static server -->
+    <script src="js/materials.js"></script>
+    <script src="js/sim.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
