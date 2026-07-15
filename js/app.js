@@ -185,13 +185,18 @@
   var fanDir = 7; // 1..8 heading for painted fans; default blows up
   var shape = null; // active line/box/circle drag: {x0,y0,x1,y1,kind}
   var cursor = null; // {x,y} grid coords of pointer, for the brush-ring preview
+  var erasing = false; // right-button drag paints EMPTY regardless of selection
+
+  function currentMat() {
+    return erasing ? MAT.EMPTY : selected;
+  }
 
   function paintData() {
-    return selected === MAT.FAN ? fanDir : undefined;
+    return currentMat() === MAT.FAN ? fanDir : undefined;
   }
 
   function dab(x, y) {
-    sim.paint(x, y, selected, brushSize, paintData());
+    sim.paint(x, y, currentMat(), brushSize, paintData());
   }
 
   // Paint a straight line of brush dabs between two grid points.
@@ -235,9 +240,10 @@
   canvas.addEventListener("pointerdown", function (e) {
     canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
+    erasing = e.button === 2; // right button erases
     var p = clientToGrid(e.clientX, e.clientY);
     if (tool === "fill") {
-      sim.fill(p.x, p.y, selected === MAT.EMPTY ? -1 : selected);
+      sim.fill(p.x, p.y, currentMat() === MAT.EMPTY ? -1 : currentMat());
       return;
     }
     // Shift turns freehand into a straight line
@@ -271,6 +277,7 @@
       commitShape(shape);
       shape = null;
     }
+    erasing = false;
   }
   canvas.addEventListener("pointerup", endStroke);
   canvas.addEventListener("pointercancel", endStroke);
@@ -347,7 +354,7 @@
   // Ring showing brush position/size while hovering (not during a shape drag).
   function drawCursor() {
     if (!cursor || shape) return;
-    var c = M.colorFor(selected === MAT.EMPTY ? MAT.WALL : selected);
+    var c = M.colorFor(currentMat() === MAT.EMPTY ? MAT.WALL : currentMat());
     ctx.save();
     ctx.globalAlpha = 0.6;
     ctx.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
@@ -419,6 +426,6 @@
 
   if (hintEl) {
     hintEl.textContent =
-      "Drag to paint · Shift+drag straight line · Scroll brush · Space pause · C clear · 1–9 materials";
+      "Drag to paint · Right-drag erase · Shift+drag straight line · Scroll brush · Space pause · C clear · 1–9 materials";
   }
 })();
