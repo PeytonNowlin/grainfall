@@ -1678,6 +1678,32 @@
           r = Math.max(0, Math.min(255, 62 + gu));
           g = Math.max(0, Math.min(255, 62 + gu));
           b = Math.max(0, Math.min(255, 68 + gu));
+        } else if (m === MAT.SAND) {
+          // Warm grain with slight sun-sparkle so dunes read alive
+          var sdv = (n0 % 40) - 20;
+          r = Math.max(0, Math.min(255, 230 + sdv));
+          g = Math.max(0, Math.min(255, 196 + sdv));
+          b = Math.max(0, Math.min(255, 92 + (sdv >> 1)));
+          if (((n0 + (frame >> 2)) & 63) < 2) {
+            r = Math.min(255, r + 25);
+            g = Math.min(255, g + 20);
+            b = Math.min(255, b + 10);
+          }
+        } else if (m === MAT.STONE) {
+          var sk = (n0 % 26) - 13;
+          r = Math.max(0, Math.min(255, 118 + sk));
+          g = Math.max(0, Math.min(255, 116 + sk));
+          b = Math.max(0, Math.min(255, 110 + sk));
+          if ((n0 & 15) === 0) {
+            r = Math.max(0, r - 18);
+            g = Math.max(0, g - 16);
+            b = Math.max(0, b - 14);
+          }
+        } else if (m === MAT.WALL) {
+          var wv2 = (n0 % 16) - 8;
+          r = Math.max(0, Math.min(255, 90 + wv2));
+          g = Math.max(0, Math.min(255, 96 + wv2));
+          b = Math.max(0, Math.min(255, 110 + wv2));
         } else {
           var vr = VARI[m];
           var v = vr ? (n0 % vr) - (vr >> 1) : 0;

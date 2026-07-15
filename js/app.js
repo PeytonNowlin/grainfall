@@ -81,15 +81,40 @@
   var imageData = ctx.createImageData(GRID_W, GRID_H);
   var rgba = imageData.data;
 
+  var selectionSwatch = document.getElementById("selection-swatch");
+  var selectionName = document.getElementById("selection-name");
+
+  function paletteEntryFor(id) {
+    for (var i = 0; i < M.PALETTE.length; i++) {
+      var p = M.PALETTE[i];
+      if (p.id === id || (id === MAT.EMPTY && p.id === -1)) return p;
+    }
+    return null;
+  }
+
+  function syncSelectionChip() {
+    var entry = paletteEntryFor(selected);
+    var name = entry ? entry.name : "Material";
+    var color = entry ? entry.color : "#e6c45c";
+    if (selectionName) selectionName.textContent = name;
+    if (selectionSwatch) {
+      selectionSwatch.style.background = color;
+      selectionSwatch.classList.toggle("swatch-erase", selected === MAT.EMPTY);
+    }
+    var chip = document.getElementById("selection-chip");
+    if (chip) chip.title = "Current material: " + name;
+  }
+
   // --- Palette UI ---
   function buildPalette() {
     paletteEl.innerHTML = "";
-    M.PALETTE.forEach(function (item) {
+    M.PALETTE.forEach(function (item, index) {
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "mat-btn" + (item.id === selected || (item.id === -1 && selected === MAT.EMPTY) ? " active" : "");
       btn.dataset.id = String(item.id);
-      btn.title = item.name;
+      var hotkey = index < 9 ? String(index + 1) : "";
+      btn.title = hotkey ? item.name + " (" + hotkey + ")" : item.name;
       btn.setAttribute("aria-label", item.name);
 
       var swatch = document.createElement("span");
@@ -105,15 +130,24 @@
 
       btn.appendChild(swatch);
       btn.appendChild(label);
+      if (hotkey) {
+        var badge = document.createElement("span");
+        badge.className = "key-badge";
+        badge.textContent = hotkey;
+        badge.setAttribute("aria-hidden", "true");
+        btn.appendChild(badge);
+      }
       btn.addEventListener("click", function () {
         selected = item.id === -1 ? MAT.EMPTY : item.id;
         Array.prototype.forEach.call(paletteEl.querySelectorAll(".mat-btn"), function (b) {
           b.classList.remove("active");
         });
         btn.classList.add("active");
+        syncSelectionChip();
       });
       paletteEl.appendChild(btn);
     });
+    syncSelectionChip();
   }
   buildPalette();
 
@@ -146,21 +180,31 @@
       });
     }
   }
+  // Letter hotkeys for tools: F/L/B/O/G.
+  var TOOL_KEYS = { f: "free", l: "line", b: "box", o: "circle", g: "fill" };
+  var TOOL_KEY_LABEL = { free: "F", line: "L", box: "B", circle: "O", fill: "G" };
   if (toolEl) {
     TOOLS.forEach(function (t) {
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "tool-btn" + (t.id === tool ? " active" : "");
-      btn.textContent = t.name;
       btn.dataset.tool = t.id;
+      btn.title = t.name + " (" + TOOL_KEY_LABEL[t.id] + ")";
+      var nameSpan = document.createElement("span");
+      nameSpan.className = "tool-name";
+      nameSpan.textContent = t.name;
+      var keySpan = document.createElement("span");
+      keySpan.className = "key-badge tool-key";
+      keySpan.textContent = TOOL_KEY_LABEL[t.id];
+      keySpan.setAttribute("aria-hidden", "true");
+      btn.appendChild(nameSpan);
+      btn.appendChild(keySpan);
       btn.addEventListener("click", function () {
         selectTool(t.id);
       });
       toolEl.appendChild(btn);
     });
   }
-  // Letter hotkeys for tools: F/L/B/O/G.
-  var TOOL_KEYS = { f: "free", l: "line", b: "box", o: "circle", g: "fill" };
 
   // --- Speed slider ---
   if (speedEl) {
@@ -187,11 +231,18 @@
     });
   }
 
-  if (pauseBtn) {
-    pauseBtn.addEventListener("click", function () {
-      paused = !paused;
+  function setPaused(next) {
+    paused = !!next;
+    if (pauseBtn) {
       pauseBtn.textContent = paused ? "Resume" : "Pause";
       pauseBtn.setAttribute("aria-pressed", paused ? "true" : "false");
+      pauseBtn.classList.toggle("btn-paused", paused);
+    }
+    document.body.classList.toggle("is-paused", paused);
+  }
+  if (pauseBtn) {
+    pauseBtn.addEventListener("click", function () {
+      setPaused(!paused);
     });
   }
 
@@ -350,10 +401,7 @@
   window.addEventListener("keydown", function (e) {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     if (e.key === " ") {
-      paused = !paused;
-      if (pauseBtn) {
-        pauseBtn.textContent = paused ? "Resume" : "Pause";
-      }
+      setPaused(!paused);
       e.preventDefault();
     }
     if (e.key === "c" || e.key === "C") {
@@ -536,7 +584,11 @@
       fpsFrames++;
       if (!fpsSince) fpsSince = now;
       if (now - fpsSince >= 500) {
-        statsEl.textContent = Math.round((fpsFrames * 1000) / (now - fpsSince)) + " fps";
+        var fps = Math.round((fpsFrames * 1000) / (now - fpsSince));
+        statsEl.textContent = fps + " fps";
+        statsEl.classList.toggle("stats-good", fps >= 50);
+        statsEl.classList.toggle("stats-ok", fps >= 30 && fps < 50);
+        statsEl.classList.toggle("stats-low", fps < 30);
         fpsFrames = 0;
         fpsSince = now;
       }
@@ -554,6 +606,7 @@
     setSelected: function (id) {
       selected = id;
       buildPalette();
+      syncSelectionChip();
     },
     get brushSize() {
       return brushSize;

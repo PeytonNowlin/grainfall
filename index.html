@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="Grainfall — a browser falling-sand sandbox. Paint sand, water, lava, napalm and more." />
+    <meta name="theme-color" content="#0c0e14" />
+    <meta name="color-scheme" content="dark" />
     <title>Grainfall</title>
     <link rel="stylesheet" href="css/style.css" />
   </head>
@@ -14,6 +16,10 @@
         <p class="tagline">Paint particles · gravity · fire &amp; water reactions</p>
       </div>
       <div class="header-actions">
+        <div class="selection-chip" id="selection-chip" aria-live="polite" title="Current material">
+          <span class="selection-swatch" id="selection-swatch"></span>
+          <span class="selection-name" id="selection-name">Sand</span>
+        </div>
         <button type="button" class="btn" id="btn-pause" aria-pressed="false">Pause</button>
         <button type="button" class="btn" id="btn-save">Save PNG</button>
         <button type="button" class="btn btn-danger" id="btn-clear">Clear</button>
@@ -48,8 +54,10 @@
             <input type="range" id="speed" min="0" max="4" value="2" />
             <span id="speed-label">1×</span>
           </div>
-          <p id="hint">Click &amp; drag to paint · Space pause · C clear</p>
-          <p id="stats" aria-live="off">— fps</p>
+          <div class="brush-meta">
+            <p id="hint">Click &amp; drag to paint · Space pause · C clear</p>
+            <p id="stats" class="stats-pill" aria-live="off">— fps</p>
+          </div>
         </section>
       </aside>
     </main>
