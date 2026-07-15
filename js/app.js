@@ -314,6 +314,10 @@
     if (e.key === "c" || e.key === "C") {
       sim.clear();
     }
+    if (e.key === "s" || e.key === "S") {
+      savePNG();
+      e.preventDefault();
+    }
     var num = parseInt(e.key, 10);
     if (num >= 1 && num <= 9) {
       var item = M.PALETTE[num - 1];
@@ -379,6 +383,17 @@
     ctx.restore();
   }
 
+  // Download the current grid as a PNG. Re-blits first so overlays (cursor
+  // ring, shape preview) are excluded from the saved image.
+  function savePNG() {
+    sim.renderTo(rgba);
+    ctx.putImageData(imageData, 0, 0);
+    var a = document.createElement("a");
+    a.download = "grainfall-" + Date.now() + ".png";
+    a.href = canvas.toDataURL("image/png");
+    a.click();
+  }
+
   // --- Main loop ---
   function frame() {
     if (!paused) {
@@ -440,6 +455,6 @@
 
   if (hintEl) {
     hintEl.textContent =
-      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · ←/→ cycle materials · Space pause · C clear · 1–9 materials";
+      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · ←/→ cycle materials · Space pause · C clear · S save PNG · 1–9 materials";
   }
 })();
