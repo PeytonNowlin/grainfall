@@ -45,7 +45,7 @@
   DENSITY[MAT.BIRD] = 255;
   DENSITY[MAT.FIGHTER] = 255;
   DENSITY[MAT.METAL] = 255;
-  DENSITY[MAT.THUNDER] = 2;
+  DENSITY[MAT.LIGHTNING] = 95;
 
   // Chance per frame that adjacent heat ignites the material (0 = not flammable).
   var IGNITE = new Float32Array(32);
@@ -82,11 +82,11 @@
 
   // Sideways flow distance per frame (lava is viscous, water is runny).
   var SPREAD = new Uint8Array(32);
-  SPREAD[MAT.WATER] = 4;
-  SPREAD[MAT.OIL] = 3;
+  SPREAD[MAT.WATER] = 6;
+  SPREAD[MAT.OIL] = 4;
   SPREAD[MAT.NAPALM] = 2;
   SPREAD[MAT.LAVA] = 1;
-  SPREAD[MAT.ACID] = 3;
+  SPREAD[MAT.ACID] = 4;
   SPREAD[MAT.MERCURY] = 2;
   SPREAD[MAT.NITRO] = 2;
 
@@ -126,6 +126,18 @@
   DIGGABLE[MAT.SNOW] = true;
   DIGGABLE[MAT.GUNPOWDER] = true;
 
+  // Solids that fall when unsupported (stone/metal/wall stay as terrain/structure).
+  var FALLING_SOLID = {};
+  FALLING_SOLID[MAT.WOOD] = true;
+  FALLING_SOLID[MAT.ICE] = true;
+  FALLING_SOLID[MAT.GLASS] = true;
+
+  // Soft materials crushed by heavy powders / dense liquids.
+  var CRUSHABLE = {};
+  CRUSHABLE[MAT.PLANT] = true;
+  CRUSHABLE[MAT.SEED] = true;
+  CRUSHABLE[MAT.SNOW] = true;
+
   /**
    * @param {number} width
    * @param {number} height
@@ -156,10 +168,11 @@
     var windX2 = new Float32Array(wW * wH);
     var windY2 = new Float32Array(wW * wH);
 
-    // Electricity: charge state rides in life[] on conductors (metal/water).
+    // Electricity: charge state rides in life[] on conductors (metal/water/mercury).
     // WireWorld-style: 0 neutral, 2 head (live), 1 tail (refractory).
     var chargeNext = new Uint8Array(w * h);
     var hasCharge = false;
+    var chargeAge = 0; // consecutive frames with live charge; used to kill loops
 
     function rand() {
       // xorshift32
@@ -215,6 +228,7 @@
       windX.fill(0);
       windY.fill(0);
       hasCharge = false;
+      chargeAge = 0;
     }
 
     /** Diffuse (5-point blur) + decay the wind field. */
@@ -238,6 +252,19 @@
     }
 
     /**
+     * Move into empty or gas/fire/steam (swap). Used by wind and blast fling so
+     * residual fireball air doesn't brick particle motion.
+     */
+    function tryMoveAir(x, y, nx, ny) {
+      if (!inBounds(nx, ny)) return false;
+      var j = idx(nx, ny);
+      var d = grid[j];
+      if (d !== MAT.EMPTY && !M.isGas(d)) return false;
+      swapCells(idx(x, y), j);
+      return true;
+    }
+
+    /**
      * Push particle at (x,y) with the local wind. Returns true if it moved.
      * factor scales susceptibility (gases ~1, powders ~0.5, liquids ~0.3).
      */
@@ -249,11 +276,11 @@
       var ax = vx < 0 ? -vx : vx;
       var ay = vy < 0 ? -vy : vy;
       if (ax > 0.2 && rand() < ax) {
-        pushed = tryMoveEmpty(x, y, x + (vx > 0 ? 1 : -1), y);
+        pushed = tryMoveAir(x, y, x + (vx > 0 ? 1 : -1), y);
         if (pushed) x += vx > 0 ? 1 : -1;
       }
       if (ay > 0.2 && rand() < ay) {
-        pushed = tryMoveEmpty(x, y, x, y + (vy > 0 ? 1 : -1)) || pushed;
+        pushed = tryMoveAir(x, y, x, y + (vy > 0 ? 1 : -1)) || pushed;
       }
       return pushed;
     }
@@ -296,7 +323,10 @@
       return true;
     }
 
-    /** Gravity move: into empty/gas always, through lighter liquid by density. */
+    /**
+     * Gravity move: into empty/gas always, through lighter liquid by density.
+     * Powders splash: kick the liquid sideways into empty/air when possible.
+     */
     function trySink(x, y, nx, ny, prob) {
       if (!inBounds(nx, ny)) return false;
       var i = idx(x, y);
@@ -309,6 +339,44 @@
       }
       if (M.isLiquid(dst) && DENSITY[src] > DENSITY[dst]) {
         if (prob == null || rand() < prob) {
+          // Splash: powder (or denser liquid) displaces liquid sideways
+          if (M.isPowder(src) || M.isLiquid(src)) {
+            var sdir = randBool() ? 1 : -1;
+            for (var sa = 0; sa < 2; sa++) {
+              var sx1 = nx + sdir;
+              var sx2 = nx + sdir;
+              // Side at liquid row, or one row up (spray)
+              if (inBounds(sx1, ny) && (grid[idx(sx1, ny)] === MAT.EMPTY || M.isGas(grid[idx(sx1, ny)]))) {
+                var side = idx(sx1, ny);
+                var liqLife = life[j];
+                grid[side] = dst;
+                life[side] = liqLife;
+                grid[j] = src;
+                life[j] = life[i];
+                grid[i] = MAT.EMPTY;
+                life[i] = 0;
+                moved[i] = 1;
+                moved[j] = 1;
+                moved[side] = 1;
+                return true;
+              }
+              if (inBounds(sx2, ny - 1) && (grid[idx(sx2, ny - 1)] === MAT.EMPTY || M.isGas(grid[idx(sx2, ny - 1)]))) {
+                var sideUp = idx(sx2, ny - 1);
+                var liqLife2 = life[j];
+                grid[sideUp] = dst;
+                life[sideUp] = liqLife2;
+                grid[j] = src;
+                life[j] = life[i];
+                grid[i] = MAT.EMPTY;
+                life[i] = 0;
+                moved[i] = 1;
+                moved[j] = 1;
+                moved[sideUp] = 1;
+                return true;
+              }
+              sdir = -sdir;
+            }
+          }
           swapCells(i, j);
           return true;
         }
@@ -334,10 +402,19 @@
      * Detonation: fireball radius r. Inner half vaporizes (walls survive),
      * water flashes to steam, other explosives become fire and chain-detonate
      * next frame so blasts visibly propagate.
+     * Solid debris is ejected past the blast radius so grit sprays out of the crater.
      */
     function explode(cx, cy, r) {
       var r2 = r * r;
       var core = r2 >> 1;
+      // Deferred ejecta: [fromX, fromY, mat] — placed after the fireball so paths are clear
+      var ejecta = [];
+
+      function queueDebris(x, y, mat) {
+        // Mark source as fire/empty later; remember to spit debris outward
+        ejecta.push(x, y, mat);
+      }
+
       for (var dy = -r; dy <= r; dy++) {
         for (var dx = -r; dx <= r; dx++) {
           var d2 = dx * dx + dy * dy;
@@ -356,25 +433,101 @@
           } else if (m === MAT.MERCURY) {
             continue; // too heavy to vaporize
           } else if (d2 <= core) {
-            // Inner core: everything is vaporized into fire, ice and all
-            become(j, MAT.FIRE, 20 + ((rand() * 25) | 0));
+            // Inner core: vaporize into fire; outer-core edge becomes ejecta
+            if (d2 > core * 0.55 && (m === MAT.STONE || m === MAT.SAND || m === MAT.WOOD) && rand() < 0.4) {
+              queueDebris(x, y, MAT.SAND);
+              become(j, MAT.FIRE, 12 + ((rand() * 12) | 0));
+            } else {
+              become(j, MAT.FIRE, 20 + ((rand() * 25) | 0));
+            }
           } else if (m === MAT.EMPTY || IGNITE[m]) {
             become(j, MAT.FIRE, 10 + ((rand() * 20) | 0));
           } else if (m === MAT.ICE || m === MAT.GLASS) {
-            // Brittle: shatter, leaving a little debris for the shockwave to fling
-            become(j, m === MAT.ICE && rand() < 0.3 ? MAT.SNOW : MAT.EMPTY, 0);
-          } else if (m === MAT.STONE || m === MAT.SAND) {
-            become(j, rand() < 0.5 ? MAT.SAND : MAT.EMPTY, 0);
+            if (m === MAT.ICE && rand() < 0.65) {
+              queueDebris(x, y, MAT.SNOW);
+              become(j, MAT.FIRE, 8 + ((rand() * 8) | 0));
+            } else if (m === MAT.GLASS && rand() < 0.45) {
+              queueDebris(x, y, MAT.SAND);
+              become(j, MAT.FIRE, 8 + ((rand() * 8) | 0));
+            } else {
+              become(j, MAT.EMPTY, 0);
+            }
+          } else if (m === MAT.STONE || m === MAT.SAND || m === MAT.WOOD || m === MAT.PLANT || m === MAT.SNOW) {
+            if (m === MAT.SNOW && rand() < 0.45) {
+              queueDebris(x, y, MAT.SNOW);
+            } else if (rand() < 0.75) {
+              queueDebris(x, y, MAT.SAND);
+            }
+            become(j, MAT.FIRE, 8 + ((rand() * 10) | 0));
           } else if (m !== MAT.METAL) {
-            // Everything else in the outer ring is blown away
+            if (rand() < 0.2) queueDebris(x, y, MAT.SAND);
             become(j, MAT.EMPTY, 0);
           }
         }
       }
-      // Shockwave: radial wind burst so debris gets thrown around
+
+      // Spit queued debris past the fireball along radial rays into free air
+      for (var ei = 0; ei < ejecta.length; ei += 3) {
+        var ex0 = ejecta[ei];
+        var ey0 = ejecta[ei + 1];
+        var em = ejecta[ei + 2];
+        var edx = ex0 - cx;
+        var edy = ey0 - cy;
+        if (edx === 0 && edy === 0) {
+          edx = randBool() ? 1 : -1;
+        }
+        var edist = Math.sqrt(edx * edx + edy * edy) || 1;
+        var eux = edx / edist;
+        var euy = edy / edist - 0.4;
+        // Land outside the blast radius when possible
+        var minOut = r + 1;
+        var maxOut = r + 5;
+        var placed = false;
+        for (var es = maxOut; es >= minOut; es--) {
+          var tx = cx + Math.round(eux * es);
+          var ty = cy + Math.round(euy * es);
+          if (!inBounds(tx, ty)) continue;
+          var ti = idx(tx, ty);
+          var td = grid[ti];
+          if (td === MAT.EMPTY || M.isGas(td)) {
+            become(ti, em, 0);
+            placed = true;
+            break;
+          }
+        }
+        // Fallback: walk outward from the source cell through air; land at farthest free pad
+        if (!placed) {
+          var bestX = -1;
+          var bestY = -1;
+          for (var es2 = 1; es2 <= maxOut; es2++) {
+            var tx2 = ex0 + Math.round(eux * es2);
+            var ty2 = ey0 + Math.round(euy * es2);
+            if (!inBounds(tx2, ty2)) break;
+            var td2 = grid[idx(tx2, ty2)];
+            if (td2 === MAT.EMPTY || M.isGas(td2)) {
+              bestX = tx2;
+              bestY = ty2;
+            } else if (M.isSolid(td2) || td2 === MAT.WALL) {
+              break;
+            } else {
+              break;
+            }
+          }
+          if (bestX >= 0) {
+            become(idx(bestX, bestY), em, 0);
+            placed = true;
+          }
+        }
+        // Last resort: leave grit at the crater rim
+        if (!placed && inBounds(ex0, ey0) && (grid[idx(ex0, ey0)] === MAT.EMPTY || M.isGas(grid[idx(ex0, ey0)]))) {
+          become(idx(ex0, ey0), em, 0);
+        }
+      }
+
+      // Shockwave: stronger short-range radial wind so remaining grit keeps moving
       var ccx = cx >> 2;
       var ccy = cy >> 2;
-      var cr = (r >> 2) + 3;
+      var cr = (r >> 2) + 4;
       for (var wy = ccy - cr; wy <= ccy + cr; wy++) {
         for (var wx = ccx - cr; wx <= ccx + cr; wx++) {
           if (wx < 0 || wy < 0 || wx >= wW || wy >= wH) continue;
@@ -384,8 +537,8 @@
           var fall = 1 - dist / (cr + 1);
           if (fall <= 0) continue;
           var c = wy * wW + wx;
-          windX[c] += (ex / dist) * 9 * fall;
-          windY[c] += (ey / dist) * 9 * fall - 2 * fall; // slight upward bias
+          windX[c] += (ex / dist) * 13 * fall;
+          windY[c] += (ey / dist) * 13 * fall - 3 * fall; // slight upward bias
         }
       }
     }
@@ -635,27 +788,126 @@
     }
 
     function isConductor(m) {
-      return m === MAT.METAL || m === MAT.WATER;
+      // Mercury is a metallic liquid — it conducts like metal/water.
+      return m === MAT.METAL || m === MAT.WATER || m === MAT.MERCURY;
     }
 
-    /** Thunder is an impulse: it charges nearby conductors, zaps, then flashes out. */
-    function updateThunder(x, y) {
+    /**
+     * Lightning bolt: falls fast, then strikes.
+     * Real-ish effects: charges conductors, fuses sand into glass (fulgurites),
+     * cracks ice/glass, flash-melts snow, ignites fuels, electrocutes creatures.
+     */
+    function lightningShouldArc(x, y) {
       for (var dy = -1; dy <= 1; dy++) {
         for (var dx = -1; dx <= 1; dx++) {
           if (dx === 0 && dy === 0) continue;
-          var nx = x + dx;
-          var ny = y + dy;
-          if (!inBounds(nx, ny)) continue;
-          var j = idx(nx, ny);
-          var m = grid[j];
-          if (isConductor(m)) {
-            if (life[j] === 0) life[j] = 2; // inject a charge head
-          } else if (IGNITE[m]) {
-            tryIgnite(nx, ny);
+          var m = cellAt(x + dx, y + dy);
+          if (
+            isConductor(m) ||
+            m === MAT.ICE ||
+            m === MAT.ANT ||
+            m === MAT.BIRD ||
+            m === MAT.FIGHTER
+          ) {
+            return true;
           }
         }
       }
-      become(idx(x, y), MAT.FIRE, 2 + ((rand() * 3) | 0)); // visible flash
+      return false;
+    }
+
+    /** Apply strike effects to one cell; d2 is squared distance from bolt. */
+    function lightningHitCell(nx, ny, d2) {
+      if (!inBounds(nx, ny)) return;
+      var j = idx(nx, ny);
+      var m = grid[j];
+      if (m === MAT.EMPTY || m === MAT.WALL || m === MAT.CLONE || m === MAT.LIGHTNING) return;
+
+      if (isConductor(m)) {
+        if (life[j] === 0) life[j] = 2;
+        hasCharge = true;
+        // Strike heat flashes some surface water to steam
+        if (m === MAT.WATER && d2 <= 1 && rand() < 0.2) {
+          become(j, MAT.STEAM, 50 + ((rand() * 40) | 0));
+        }
+        return;
+      }
+
+      if (m === MAT.SAND) {
+        // Fulgurites: lightning fuses sand into glass
+        if (d2 <= 1 || rand() < 0.75) become(j, MAT.GLASS, 0);
+        else if (rand() < 0.4) become(j, MAT.GLASS, 0);
+        return;
+      }
+
+      if (m === MAT.ICE) {
+        var roll = rand();
+        if (roll < 0.5) become(j, MAT.WATER, 0);
+        else if (roll < 0.85) become(j, MAT.SNOW, 0);
+        else become(j, MAT.EMPTY, 0);
+        return;
+      }
+
+      if (m === MAT.SNOW) {
+        become(j, rand() < 0.8 ? MAT.WATER : MAT.EMPTY, 0);
+        return;
+      }
+
+      if (m === MAT.GLASS) {
+        // Thermal shock shatters glass
+        if (d2 <= 2 || rand() < 0.6) become(j, rand() < 0.35 ? MAT.SAND : MAT.EMPTY, 0);
+        return;
+      }
+
+      if (m === MAT.STONE && d2 <= 2 && rand() < 0.25) {
+        // Close strike can spall stone into sand grit
+        become(j, MAT.SAND, 0);
+        return;
+      }
+
+      if (m === MAT.ANT || m === MAT.BIRD || m === MAT.FIGHTER) {
+        if (d2 <= 4) become(j, MAT.FIRE, 8 + ((rand() * 6) | 0));
+        return;
+      }
+
+      if (IGNITE[m]) {
+        tryIgnite(nx, ny);
+      }
+    }
+
+    function dischargeLightning(x, y) {
+      var R = 2;
+      for (var dy = -R; dy <= R; dy++) {
+        for (var dx = -R; dx <= R; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          var d2 = dx * dx + dy * dy;
+          if (d2 > R * R) continue;
+          lightningHitCell(x + dx, y + dy, d2);
+        }
+      }
+    }
+
+    function updateLightning(x, y) {
+      var cx = x;
+      var cy = y;
+      // Fall several cells per frame so bolts feel snappy, not like rising fire.
+      for (var n = 0; n < 3; n++) {
+        if (lightningShouldArc(cx, cy)) {
+          dischargeLightning(cx, cy);
+          become(idx(cx, cy), MAT.EMPTY, 0);
+          return;
+        }
+        var below = cellAt(cx, cy + 1);
+        if (below === MAT.EMPTY || M.isGas(below)) {
+          swapCells(idx(cx, cy), idx(cx, cy + 1));
+          cy++;
+          continue;
+        }
+        // Ground strike — fuse, crack, ignite, then vanish
+        dischargeLightning(cx, cy);
+        become(idx(cx, cy), MAT.EMPTY, 0);
+        return;
+      }
     }
 
     /** A live conductor cell (charge head) zaps its neighbors. */
@@ -678,13 +930,27 @@
     }
 
     /**
-     * WireWorld-style charge propagation on conductors (metal + water).
-     * head(2) -> tail(1) -> neutral(0); a neutral conductor becomes a head
-     * when any 8-neighbour conductor is currently a head. One cell/frame.
+     * WireWorld-style charge on conductors (metal / water / mercury).
+     * head(2) -> tail(1) -> neutral(0). A neutral cell becomes a head only when
+     * exactly 1 or 2 neighbouring conductors are heads (classic WireWorld).
+     * Using "any neighbour" made solid metal blobs self-excite forever.
+     * chargeAge caps runaway loops (e.g. metal rings) so charge always dies out.
      */
     function stepElectric() {
       var n = w * h;
       var active = false;
+      chargeNext.fill(0);
+
+      // Hard dissipate: nothing stays electrified permanently
+      if (chargeAge > 48) {
+        for (var c = 0; c < n; c++) {
+          if (isConductor(grid[c])) life[c] = 0;
+        }
+        hasCharge = false;
+        chargeAge = 0;
+        return;
+      }
+
       for (var i = 0; i < n; i++) {
         var m = grid[i];
         if (!isConductor(m)) continue;
@@ -695,51 +961,157 @@
           active = true;
         } else if (s === 1) {
           chargeNext[i] = 0;
+          active = true; // still settling
         } else {
           var x = i % w;
           var y = (i / w) | 0;
-          var head = false;
-          for (var dy = -1; dy <= 1 && !head; dy++) {
+          var heads = 0;
+          for (var dy = -1; dy <= 1; dy++) {
             for (var dx = -1; dx <= 1; dx++) {
               if (dx === 0 && dy === 0) continue;
               var nx = x + dx;
               var ny = y + dy;
               if (!inBounds(nx, ny)) continue;
               var k = idx(nx, ny);
-              if (isConductor(grid[k]) && life[k] === 2) {
-                head = true;
-                break;
-              }
+              if (isConductor(grid[k]) && life[k] === 2) heads++;
             }
           }
-          chargeNext[i] = head ? 2 : 0;
-          if (head) active = true;
+          // Classic WireWorld: birth only with 1 or 2 head neighbours
+          if (heads === 1 || heads === 2) {
+            chargeNext[i] = 2;
+            active = true;
+          } else {
+            chargeNext[i] = 0;
+          }
         }
       }
-      if (!active && !hasCharge) return; // nothing to write back
+
+      if (!active && !hasCharge) {
+        chargeAge = 0;
+        return;
+      }
+
       for (var b = 0; b < n; b++) {
         if (isConductor(grid[b])) life[b] = chargeNext[b];
       }
       hasCharge = active;
+      chargeAge = active ? chargeAge + 1 : 0;
+    }
+
+    /** True if sand is adjacent to water (damp piles settle instead of tumbling). */
+    function sandIsDamp(x, y) {
+      return (
+        cellAt(x - 1, y) === MAT.WATER ||
+        cellAt(x + 1, y) === MAT.WATER ||
+        cellAt(x, y - 1) === MAT.WATER ||
+        cellAt(x, y + 1) === MAT.WATER ||
+        cellAt(x - 1, y + 1) === MAT.WATER ||
+        cellAt(x + 1, y + 1) === MAT.WATER
+      );
+    }
+
+    /** Lateral neighbor of same powder or a solid — used to decide stickiness. */
+    function powderHasSupport(x, y, m) {
+      var l = cellAt(x - 1, y);
+      var r = cellAt(x + 1, y);
+      return l === m || r === m || M.isSolid(l) || M.isSolid(r);
+    }
+
+    /** True if diagonal (dx) drops at least 2 free cells — steep face should avalanche. */
+    function steepDrop(x, y, dx) {
+      var c1 = cellAt(x + dx, y + 1);
+      var c2 = cellAt(x + dx, y + 2);
+      var free1 = c1 === MAT.EMPTY || M.isGas(c1);
+      var free2 = c2 === MAT.EMPTY || M.isGas(c2);
+      // Also count sinking into liquid as free for avalanche purposes
+      if (!free1 && M.isLiquid(c1) && DENSITY[grid[idx(x, y)]] > DENSITY[c1]) free1 = true;
+      if (!free2 && M.isLiquid(c2) && DENSITY[grid[idx(x, y)]] > DENSITY[c2]) free2 = true;
+      return free1 && free2;
     }
 
     function updatePowder(x, y) {
-      if (windPush(x, y, 0.5)) return;
+      var i = idx(x, y);
+      var m = grid[i];
+      var damp = m === MAT.SAND && sandIsDamp(x, y);
+
+      // Damp sand barely feels wind; dry powder is normal.
+      if (windPush(x, y, damp ? 0.12 : 0.5)) return;
+      // Free fall always wins.
       if (trySink(x, y, x, y + 1)) return;
+
+      // Heavy powders crush soft materials and settle into the gap
+      var below = cellAt(x, y + 1);
+      if (
+        CRUSHABLE[below] &&
+        (m === MAT.SAND || m === MAT.GUNPOWDER || m === MAT.VIRUS) &&
+        rand() < 0.55
+      ) {
+        become(idx(x, y + 1), MAT.EMPTY, 0);
+        if (trySink(x, y, x, y + 1)) return;
+      }
+
+      // Avalanche: steep faces (2+ cell diagonal drop) always slide — overrides stick.
+      var leftSteep = steepDrop(x, y, -1);
+      var rightSteep = steepDrop(x, y, 1);
+      if (leftSteep || rightSteep) {
+        var avDir;
+        if (leftSteep && rightSteep) avDir = randBool() ? -1 : 1;
+        else avDir = leftSteep ? -1 : 1;
+        if (trySink(x, y, x + avDir, y + 1)) return;
+        if (trySink(x, y, x - avDir, y + 1)) return;
+        return;
+      }
+
+      // Unsupported 1-wide columns always tumble (prevents thin spires).
+      // Supported grains stick more often so piles form stable slopes.
+      var supported = powderHasSupport(x, y, m);
+      if (supported) {
+        var stick =
+          damp ? 0.8 : m === MAT.SAND ? 0.42 : m === MAT.SNOW ? 0.5 : 0.22;
+        if (rand() < stick) return;
+      }
+
+      // Prefer the diagonal that packs against existing powder (wider base).
       var dir = randBool() ? 1 : -1;
+      var leftPack =
+        cellAt(x - 1, y) === m ||
+        cellAt(x - 1, y + 1) === m ||
+        cellAt(x - 2, y + 1) === m;
+      var rightPack =
+        cellAt(x + 1, y) === m ||
+        cellAt(x + 1, y + 1) === m ||
+        cellAt(x + 2, y + 1) === m;
+      if (leftPack && !rightPack) dir = -1;
+      else if (rightPack && !leftPack) dir = 1;
+
+      // Damp sand slips less often even when unsupported.
+      if (damp && rand() < 0.45) return;
+
       if (trySink(x, y, x + dir, y + 1)) return;
       trySink(x, y, x - dir, y + 1);
     }
 
     function flowSideways(x, y, spread) {
+      // Grounded liquids level farther so tanks fill flat instead of columns.
+      var below = cellAt(x, y + 1);
+      var above = cellAt(x, y - 1);
+      if (below !== MAT.EMPTY && !M.isGas(below)) {
+        spread = spread + 2;
+      }
+      // Hydrostatic pressure: liquid stacked above pushes harder sideways.
+      if (M.isLiquid(above)) {
+        spread = spread + 2;
+        if (M.isLiquid(cellAt(x, y - 2))) spread = spread + 1;
+      }
       var dir = randBool() ? 1 : -1;
       for (var attempt = 0; attempt < 2; attempt++) {
         var dist = 0;
         for (var s = 1; s <= spread; s++) {
           if (cellAt(x + dir * s, y) !== MAT.EMPTY) break;
           dist = s;
-          // Stop at a ledge so it falls off next frame
-          if (cellAt(x + dir * s, y + 1) === MAT.EMPTY) break;
+          // Under pressure, keep flowing across shallow ledges instead of dripping early
+          if (!M.isLiquid(above) && cellAt(x + dir * s, y + 1) === MAT.EMPTY) break;
+          if (M.isLiquid(above) && cellAt(x + dir * s, y + 1) === MAT.EMPTY && s >= 2) break;
         }
         if (dist > 0) {
           swapCells(idx(x, y), idx(x + dir * dist, y));
@@ -750,27 +1122,103 @@
       return false;
     }
 
+    /**
+     * Wood / ice / glass fall when unsupported. Stone, metal, wall stay painted terrain.
+     * Falls into empty/gas; slowly sinks through liquids; diagonal slip off ledges.
+     */
+    function updateFallingSolid(x, y) {
+      var i = idx(x, y);
+      var m = grid[i];
+      var below = cellAt(x, y + 1);
+      if (below === MAT.EMPTY || M.isGas(below)) {
+        swapCells(i, idx(x, y + 1));
+        return;
+      }
+      if (M.isLiquid(below) && rand() < 0.45) {
+        swapCells(i, idx(x, y + 1));
+        return;
+      }
+      // Crush soft stuff underneath (ice/wood/glass landing on plants)
+      if (CRUSHABLE[below] && rand() < 0.5) {
+        become(idx(x, y + 1), MAT.EMPTY, 0);
+        swapCells(i, idx(x, y + 1));
+        return;
+      }
+      // Diagonal tumble off an edge when fully unsupported below
+      if (below !== MAT.EMPTY && !M.isGas(below) && !M.isLiquid(below) && !CRUSHABLE[below]) {
+        return; // resting on solid/powder
+      }
+      var dir = randBool() ? 1 : -1;
+      if (tryMoveEmpty(x, y, x + dir, y + 1)) return;
+      tryMoveEmpty(x, y, x - dir, y + 1);
+    }
+
     function updateLiquid(x, y, m) {
       if (m === MAT.WATER && waterReact(x, y)) return;
       if (m === MAT.LAVA && lavaReact(x, y)) return;
       if (m === MAT.ACID && acidReact(x, y)) return;
       if (windPush(x, y, 0.3)) return;
 
-      // Buoyancy: lighter liquid trapped under a heavier one bubbles up
+      // Dense liquids crush soft materials beneath them
+      var belowSoft = cellAt(x, y + 1);
+      if (CRUSHABLE[belowSoft] && DENSITY[m] >= DENSITY[MAT.WATER] && rand() < 0.35) {
+        become(idx(x, y + 1), MAT.EMPTY, 0);
+        swapCells(idx(x, y), idx(x, y + 1));
+        return;
+      }
+
+      // Buoyancy: lighter liquid trapped under a heavier one bubbles up (oil on water).
       var above = cellAt(x, y - 1);
-      if (M.isLiquid(above) && DENSITY[above] > DENSITY[m] && rand() < 0.3) {
+      if (M.isLiquid(above) && DENSITY[above] > DENSITY[m] && rand() < 0.6) {
         swapCells(idx(x, y), idx(x, y - 1));
         return;
       }
 
-      if (trySink(x, y, x, y + 1, 0.4)) return;
+      // Density sink through lighter liquids (water under oil, mercury under water).
+      if (trySink(x, y, x, y + 1, 0.55)) return;
+
+      // Horizontal density percolation: denser liquid drifts under lighter side-neighbors
+      var hdir = randBool() ? 1 : -1;
+      for (var ha = 0; ha < 2; ha++) {
+        var hx = x + hdir;
+        var hm = cellAt(hx, y);
+        if (M.isLiquid(hm) && DENSITY[m] > DENSITY[hm] && rand() < 0.4) {
+          var underLight = cellAt(hx, y + 1);
+          if (
+            underLight === MAT.EMPTY ||
+            M.isGas(underLight) ||
+            underLight === hm ||
+            (M.isLiquid(underLight) && DENSITY[underLight] < DENSITY[m])
+          ) {
+            swapCells(idx(x, y), idx(hx, y));
+            return;
+          }
+        }
+        hdir = -hdir;
+      }
+
+      // Oil film: prefer spreading across the free surface of water
+      if (m === MAT.OIL) {
+        var odir = randBool() ? 1 : -1;
+        for (var oa = 0; oa < 2; oa++) {
+          if (
+            cellAt(x + odir, y) === MAT.EMPTY &&
+            cellAt(x + odir, y + 1) === MAT.WATER &&
+            rand() < 0.55
+          ) {
+            swapCells(idx(x, y), idx(x + odir, y));
+            return;
+          }
+          odir = -odir;
+        }
+      }
 
       var dir = randBool() ? 1 : -1;
       if (tryMoveEmpty(x, y, x + dir, y + 1)) return;
       if (tryMoveEmpty(x, y, x - dir, y + 1)) return;
 
       if (m === MAT.LAVA && rand() < 0.6) return; // viscous
-      flowSideways(x, y, SPREAD[m]);
+      flowSideways(x, y, SPREAD[m] || 2);
     }
 
     function updatePlant(x, y) {
@@ -801,6 +1249,12 @@
       if (tryIgnite(x, y - 1)) fuel = true;
       if (fuel && rand() < 0.85) return;
 
+      // Fire is light: bubble up through liquids
+      if (M.isLiquid(cellAt(x, y - 1)) && rand() < 0.35) {
+        swapCells(i, idx(x, y - 1));
+        return;
+      }
+
       if (windPush(x, y, 1.2)) return;
       var dir = randBool() ? 1 : -1;
       if (rand() < 0.8) {
@@ -817,10 +1271,22 @@
         become(i, rand() < 0.35 ? MAT.WATER : MAT.EMPTY, 0);
         return;
       }
-      // Bubble up through water
-      if (cellAt(x, y - 1) === MAT.WATER && rand() < 0.5) {
+      // Bubble up through any liquid (not only water)
+      if (M.isLiquid(cellAt(x, y - 1)) && rand() < 0.55) {
         swapCells(i, idx(x, y - 1));
         return;
+      }
+      // Diagonal bubble through liquid when blocked above
+      if (M.isLiquid(cellAt(x, y - 1))) {
+        var sdir = randBool() ? 1 : -1;
+        if (M.isLiquid(cellAt(x + sdir, y - 1)) || cellAt(x + sdir, y - 1) === MAT.EMPTY) {
+          if (tryMoveEmpty(x, y, x + sdir, y - 1) || (M.isLiquid(cellAt(x + sdir, y - 1)) && rand() < 0.4)) {
+            if (M.isLiquid(cellAt(x + sdir, y - 1))) {
+              swapCells(i, idx(x + sdir, y - 1));
+              return;
+            }
+          }
+        }
       }
       if (windPush(x, y, 1.2)) return;
       var dir = randBool() ? 1 : -1;
@@ -833,8 +1299,8 @@
 
     function updateGas(x, y) {
       var i = idx(x, y);
-      // Bubble up through liquid
-      if (M.isLiquid(cellAt(x, y - 1)) && rand() < 0.4) {
+      // Bubble up through any liquid
+      if (M.isLiquid(cellAt(x, y - 1)) && rand() < 0.5) {
         swapCells(i, idx(x, y - 1));
         return;
       }
@@ -856,22 +1322,26 @@
         case MAT.EMPTY:
         case MAT.WALL:
         case MAT.STONE:
+        case MAT.METAL:
+          return;
         case MAT.WOOD:
         case MAT.GLASS:
-        case MAT.METAL:
+          updateFallingSolid(x, y);
           return;
         case MAT.FIRE:
         case MAT.STEAM:
         case MAT.GAS:
           return; // gas pass handles these
-        case MAT.THUNDER:
-          updateThunder(x, y);
+        case MAT.LIGHTNING:
+          updateLightning(x, y);
           return;
         case MAT.PLANT:
           updatePlant(x, y);
           return;
         case MAT.ICE:
           updateIce(x, y);
+          // Still ice after melt checks → gravity on unsupported ice
+          if (grid[i] === MAT.ICE) updateFallingSolid(x, y);
           return;
         case MAT.CLONE:
           updateClone(x, y);
@@ -1004,11 +1474,11 @@
             g = Math.max(0, Math.min(255, colors[ci + 1] + mvv));
             b = Math.max(0, Math.min(255, colors[ci + 2] + mvv));
           }
-        } else if (m === MAT.THUNDER) {
+        } else if (m === MAT.LIGHTNING) {
           var tf = (noise[i] + frame * 7) & 31;
-          r = 235;
-          g = 245;
-          b = 255 - (tf >> 2);
+          r = 255;
+          g = 200 + tf;
+          b = 20 + (tf >> 1);
         } else if (m === MAT.STEAM) {
           // Fades toward background as it dissipates
           var st = life[i];
@@ -1024,19 +1494,19 @@
           g = Math.min(255, 225 + ap);
           b = 40 + ap;
         } else if (m === MAT.MERCURY) {
-          // Metallic shimmer
+          // Heavy liquid metal shimmer (neutral silver, not glassy blue)
           var mp = (noise[i] + frame * 2) & 31;
           if (mp > 15) mp = 31 - mp;
-          r = 180 + mp * 2;
-          g = 185 + mp * 2;
-          b = 195 + mp * 2;
+          r = 165 + mp * 2;
+          g = 168 + mp * 2;
+          b = 175 + mp * 2;
         } else if (m === MAT.GAS) {
-          // Faint drifting wisps
+          // Pale yellow-green fumes (not plant-colored)
           var gp = (noise[i] * 3 + frame) & 31;
           if (gp > 15) gp = 31 - gp;
-          r = 70 + gp;
-          g = 86 + gp;
-          b = 70 + gp;
+          r = 145 + gp;
+          g = 150 + gp;
+          b = 70 + (gp >> 1);
         } else {
           var vr = VARI[m];
           var v = vr ? (noise[i] % vr) - (vr >> 1) : 0;

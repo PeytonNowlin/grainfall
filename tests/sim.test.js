@@ -402,7 +402,8 @@ for (var ffx = 0; ffx < 32; ffx++) sim.setCell(ffx, 21, MAT.WALL);
 sim.setCell(16, 20, MAT.FIGHTER);
 var fCols = {};
 var firedShots = 0;
-for (var fn = 0; fn < 40; fn++) {
+// Long window: lob chance is ~3%/frame, so short runs are RNG-flaky
+for (var fn = 0; fn < 200; fn++) {
   sim.step();
   for (var fx3 = 0; fx3 < 32; fx3++) {
     if (sim.getCell(fx3, 20) === MAT.FIGHTER) fCols[fx3] = true;
@@ -414,12 +415,49 @@ assertGt(firedShots, 0, "fighter lobs fire");
 
 // --- Electricity ---
 console.log("\n[electricity]");
-assert(MAT.METAL != null && MAT.THUNDER != null, "metal & thunder defined");
+assert(MAT.METAL != null && MAT.LIGHTNING != null, "metal & lightning defined");
+
+// Lightning falls instead of rising like fire
+sim.clear();
+sim.setCell(10, 2, MAT.LIGHTNING);
+for (var tf = 0; tf < 8; tf++) sim.step();
+assertEqual(sim.getCell(10, 2), MAT.EMPTY, "lightning left the sky");
+assertEqual(sim.countMaterial(MAT.FIRE), 0, "falling lightning does not become fire mid-air");
+var boltY = -1;
+for (var ty = 0; ty < 48; ty++) {
+  if (sim.getCell(10, ty) === MAT.LIGHTNING) boltY = ty;
+}
+assert(
+  boltY > 2 || sim.countMaterial(MAT.LIGHTNING) === 0,
+  "lightning fell downward (or discharged on landing)"
+);
+
+// Lightning cracks / flash-melts ice on strike
+sim.clear();
+for (var tix = 8; tix <= 12; tix++)
+  for (var tiy = 10; tiy <= 14; tiy++) sim.setCell(tix, tiy, MAT.ICE);
+sim.setCell(10, 8, MAT.LIGHTNING);
+var iceStruck = sim.countMaterial(MAT.ICE);
+for (var tis = 0; tis < 12; tis++) sim.step();
+var iceLeft = sim.countMaterial(MAT.ICE);
+var meltOrShatter =
+  iceStruck - iceLeft > 0 ||
+  sim.countMaterial(MAT.WATER) > 0 ||
+  sim.countMaterial(MAT.SNOW) > 0;
+assert(meltOrShatter, "lightning strike damages ice (melt/shatter)");
+
+// Lightning fuses sand into glass (fulgurites)
+sim.clear();
+for (var fsx = 8; fsx <= 14; fsx++)
+  for (var fsy = 12; fsy <= 18; fsy++) sim.setCell(fsx, fsy, MAT.SAND);
+sim.setCell(11, 10, MAT.LIGHTNING);
+for (var fss = 0; fss < 16; fss++) sim.step();
+assertGt(sim.countMaterial(MAT.GLASS), 0, "lightning fuses sand into glass (fulgurites)");
 
 // Charge travels down a metal wire, then dissipates
 sim.clear();
 for (var mwx = 2; mwx <= 20; mwx++) sim.setCell(mwx, 10, MAT.METAL);
-sim.setCell(1, 10, MAT.THUNDER);
+sim.setCell(1, 10, MAT.LIGHTNING);
 var reachedMetal = false;
 for (var el2 = 0; el2 < 40; el2++) {
   sim.step();
@@ -430,6 +468,18 @@ for (var el3 = 0; el3 < 60; el3++) sim.step();
 var anyCharge = false;
 for (var cq = 2; cq <= 20; cq++) if (sim.getCharge(cq, 10) > 0) anyCharge = true;
 assert(!anyCharge, "charge dissipates (no perpetual current)");
+
+// Solid metal pads must not stay electrified forever after a lightning strike
+sim.clear();
+for (var pmx = 8; pmx <= 16; pmx++)
+  for (var pmy = 8; pmy <= 16; pmy++) sim.setCell(pmx, pmy, MAT.METAL);
+sim.setCell(12, 6, MAT.LIGHTNING);
+for (var pms = 0; pms < 80; pms++) sim.step();
+var padCharged = false;
+for (var pcx = 8; pcx <= 16; pcx++)
+  for (var pcy = 8; pcy <= 16; pcy++)
+    if (sim.getCharge(pcx, pcy) > 0) padCharged = true;
+assert(!padCharged, "metal pad charge dissipates after lightning");
 
 // Charge conducts through water too (airtight tank so the water can't slosh)
 sim.clear();
@@ -445,7 +495,7 @@ for (var wwx = 2; wwx <= 20; wwx++)
   for (var wwy = 10; wwy <= 11; wwy++) sim.setCell(wwx, wwy, MAT.WATER);
 sim.setCell(2, 9, MAT.METAL); // probe pokes through the ceiling
 sim.setCell(2, 10, MAT.METAL);
-sim.setCell(2, 8, MAT.THUNDER);
+sim.setCell(2, 8, MAT.LIGHTNING);
 var reachedWater = false;
 for (var el4 = 0; el4 < 40; el4++) {
   sim.step();
@@ -462,13 +512,15 @@ sim.setCell(5, 9, MAT.WALL);
 sim.setCell(5, 11, MAT.WALL);
 sim.setCell(5, 10, MAT.METAL);
 sim.setCell(4, 10, MAT.ANT);
-sim.setCell(6, 10, MAT.THUNDER);
+sim.setCell(6, 10, MAT.LIGHTNING);
 for (var el5 = 0; el5 < 6; el5++) sim.step();
 assertEqual(sim.countMaterial(MAT.ANT), 0, "charged metal electrocutes adjacent creature");
 
 // --- Explosions break through solids ---
 console.log("\n[explosions vs solids]");
 sim.clear();
+// Floor so unsupported ice does not collapse before the blast
+for (var ifx = 8; ifx <= 16; ifx++) sim.setCell(ifx, 21, MAT.WALL);
 for (var ibx = 8; ibx <= 16; ibx++)
   for (var iby = 15; iby <= 20; iby++) sim.setCell(ibx, iby, MAT.ICE);
 for (var gcx = 10; gcx <= 14; gcx++) sim.setCell(gcx, 14, MAT.GUNPOWDER);
@@ -490,6 +542,338 @@ sim.setCell(11, 10, MAT.FIRE); // ignite the top of the column
 var niceBefore = sim.countMaterial(MAT.ICE);
 for (var nex = 0; nex < 40; nex++) sim.step();
 assertGt(niceBefore - sim.countMaterial(MAT.ICE), 0, "burning napalm melts through ice");
+
+// --- Physics feel: powders, liquids, explosions ---
+console.log("\n[physics feel]");
+
+// Helper: pour mat at (sx,sy) only when empty, then step, up to count grains.
+function pour(simRef, sx, sy, mat, count, stepsBetween) {
+  var placed = 0;
+  var guard = 0;
+  while (placed < count && guard < count * 40) {
+    if (simRef.getCell(sx, sy) === MAT.EMPTY) {
+      simRef.setCell(sx, sy, mat);
+      placed++;
+    }
+    for (var pi = 0; pi < (stepsBetween || 3); pi++) simRef.step();
+    guard++;
+  }
+  return placed;
+}
+
+// Sand dropped in a column forms a wide heap (not a 1-wide spire)
+sim.clear();
+for (var pfx = 0; pfx < 32; pfx++) sim.setCell(pfx, 23, MAT.WALL);
+assertEqual(pour(sim, 16, 1, MAT.SAND, 40, 4), 40, "poured 40 sand");
+for (var psettle = 0; psettle < 120; psettle++) sim.step();
+var sandCols = {};
+var sandCountHeap = sim.countMaterial(MAT.SAND);
+for (var phy = 0; phy < 23; phy++) {
+  for (var phx = 0; phx < 32; phx++) {
+    if (sim.getCell(phx, phy) === MAT.SAND) sandCols[phx] = true;
+  }
+}
+assertEqual(sandCountHeap, 40, "sand conserved while forming heap");
+assertGt(Object.keys(sandCols).length, 3, "sand forms multi-column heap (not a thin spire)");
+
+// Damp sand near water spreads less than dry sand poured the same way
+sim.clear();
+for (var dfx = 0; dfx < 32; dfx++) sim.setCell(dfx, 23, MAT.WALL);
+// Water pool on the left half of the floor
+for (var dwx = 0; dwx <= 16; dwx++) sim.setCell(dwx, 22, MAT.WATER);
+assertEqual(pour(sim, 8, 5, MAT.SAND, 20, 3), 20, "poured damp sand");
+for (var dsettle = 0; dsettle < 80; dsettle++) sim.step();
+var dampMin = 32;
+var dampMax = 0;
+var dampGrains = 0;
+for (var dy2 = 0; dy2 < 23; dy2++) {
+  for (var dx2 = 0; dx2 < 32; dx2++) {
+    if (sim.getCell(dx2, dy2) === MAT.SAND) {
+      dampGrains++;
+      if (dx2 < dampMin) dampMin = dx2;
+      if (dx2 > dampMax) dampMax = dx2;
+    }
+  }
+}
+var dampSpan = dampMax - dampMin;
+assertEqual(dampGrains, 20, "damp sand conserved");
+// Dry control: same drop over dry floor
+sim.clear();
+for (var dryf = 0; dryf < 32; dryf++) sim.setCell(dryf, 23, MAT.WALL);
+assertEqual(pour(sim, 8, 5, MAT.SAND, 20, 3), 20, "poured dry sand");
+for (var drysettle = 0; drysettle < 80; drysettle++) sim.step();
+var dryMin = 32;
+var dryMax = 0;
+for (var dryy = 0; dryy < 23; dryy++) {
+  for (var dryx = 0; dryx < 32; dryx++) {
+    if (sim.getCell(dryx, dryy) === MAT.SAND) {
+      if (dryx < dryMin) dryMin = dryx;
+      if (dryx > dryMax) dryMax = dryx;
+    }
+  }
+}
+var drySpan = dryMax - dryMin;
+// Damp piles should not spread wider than dry; usually tighter
+assert(dampSpan <= drySpan + 1, "damp sand does not spread farther than dry sand (damp=" + dampSpan + " dry=" + drySpan + ")");
+
+// Oil floats on water after density sorting
+sim.clear();
+// Closed tank
+for (var otx = 10; otx <= 20; otx++) {
+  sim.setCell(otx, 18, MAT.WALL);
+  sim.setCell(otx, 22, MAT.WALL);
+}
+sim.setCell(10, 19, MAT.WALL);
+sim.setCell(10, 20, MAT.WALL);
+sim.setCell(10, 21, MAT.WALL);
+sim.setCell(20, 19, MAT.WALL);
+sim.setCell(20, 20, MAT.WALL);
+sim.setCell(20, 21, MAT.WALL);
+// Oil under water (should bubble up)
+for (var owx = 11; owx <= 19; owx++) {
+  sim.setCell(owx, 21, MAT.OIL);
+  sim.setCell(owx, 20, MAT.WATER);
+  sim.setCell(owx, 19, MAT.WATER);
+}
+for (var os = 0; os < 100; os++) sim.step();
+// Sample mid-tank: oil should prefer the top free row, water the bottom
+var oilOnTop = 0;
+var waterBelow = 0;
+for (var olx = 12; olx <= 18; olx++) {
+  if (sim.getCell(olx, 19) === MAT.OIL) oilOnTop++;
+  if (sim.getCell(olx, 21) === MAT.WATER) waterBelow++;
+}
+assertGt(oilOnTop, 2, "oil rises to top layer over water");
+assertGt(waterBelow, 2, "water settles under oil");
+
+// Water poured into a wide floor pool levels out (wide span)
+sim.clear();
+for (var wfx = 0; wfx < 32; wfx++) sim.setCell(wfx, 23, MAT.WALL);
+assertEqual(pour(sim, 16, 1, MAT.WATER, 30, 2), 30, "poured 30 water");
+for (var wsettle = 0; wsettle < 150; wsettle++) sim.step();
+var wMin = 32;
+var wMax = 0;
+var wCount = sim.countMaterial(MAT.WATER);
+for (var wly = 0; wly < 23; wly++) {
+  for (var wlx = 0; wlx < 32; wlx++) {
+    if (sim.getCell(wlx, wly) === MAT.WATER) {
+      if (wlx < wMin) wMin = wlx;
+      if (wlx > wMax) wMax = wlx;
+    }
+  }
+}
+assertEqual(wCount, 30, "water conserved while leveling");
+assertGt(wMax - wMin, 8, "water levels into a wide pool");
+
+// Stone block + gunpowder: blast leaves sand debris (not only empty hole)
+sim.clear();
+for (var stx = 6; stx <= 18; stx++)
+  for (var sty = 14; sty <= 20; sty++) sim.setCell(stx, sty, MAT.STONE);
+var stoneBefore = sim.countMaterial(MAT.STONE);
+for (var gpx = 10; gpx <= 14; gpx++) sim.setCell(gpx, 13, MAT.GUNPOWDER);
+sim.setCell(12, 12, MAT.FIRE);
+for (var bx = 0; bx < 25; bx++) sim.step();
+var sandDebris = sim.countMaterial(MAT.SAND);
+var stoneLeft = sim.countMaterial(MAT.STONE);
+assertGt(sandDebris, 3, "blast leaves flingable sand debris");
+assertGt(stoneBefore - stoneLeft, 5, "blast carves stone (crater)");
+
+// Blast impulse flings debris outside the original stone block
+sim.clear();
+for (var b2x = 10; b2x <= 22; b2x++)
+  for (var b2y = 12; b2y <= 20; b2y++) sim.setCell(b2x, b2y, MAT.STONE);
+for (var g2x = 14; g2x <= 18; g2x++) sim.setCell(g2x, 11, MAT.GUNPOWDER);
+sim.setCell(16, 10, MAT.FIRE);
+for (var b2s = 0; b2s < 30; b2s++) sim.step();
+var outsideDebris = 0;
+for (var ody = 0; ody < 24; ody++) {
+  for (var odx = 0; odx < 32; odx++) {
+    var om = sim.getCell(odx, ody);
+    if (om !== MAT.SAND && om !== MAT.SNOW) continue;
+    if (odx < 10 || odx > 22 || ody < 12 || ody > 20) outsideDebris++;
+  }
+}
+assertGt(outsideDebris, 0, "blast flings debris outside the original block");
+
+// Splash: sand falling into a water pool kicks water sideways
+sim.clear();
+for (var sfx = 0; sfx < 32; sfx++) sim.setCell(sfx, 23, MAT.WALL);
+// Narrow pool under the drop point
+for (var spx = 12; spx <= 16; spx++) {
+  sim.setCell(spx, 22, MAT.WATER);
+  sim.setCell(spx, 21, MAT.WATER);
+}
+var waterBeforeSpan = 16 - 12;
+// Drop sand into the pool
+for (var spdrop = 0; spdrop < 12; spdrop++) {
+  if (sim.getCell(14, 5) === MAT.EMPTY) sim.setCell(14, 5, MAT.SAND);
+  for (var sps = 0; sps < 4; sps++) sim.step();
+}
+for (var spsettle = 0; spsettle < 40; spsettle++) sim.step();
+var splashMin = 32;
+var splashMax = 0;
+var waterLeftSplash = 0;
+for (var spy = 0; spy < 23; spy++) {
+  for (var spx2 = 0; spx2 < 32; spx2++) {
+    if (sim.getCell(spx2, spy) === MAT.WATER) {
+      waterLeftSplash++;
+      if (spx2 < splashMin) splashMin = spx2;
+      if (spx2 > splashMax) splashMax = spx2;
+    }
+  }
+}
+assertGt(waterLeftSplash, 0, "splash preserves some water");
+assertGt(splashMax - splashMin, waterBeforeSpan, "sand splash kicks water wider than original pool");
+
+// Avalanche: a vertical sand tower collapses to a wider base
+sim.clear();
+for (var avx = 0; avx < 32; avx++) sim.setCell(avx, 23, MAT.WALL);
+for (var avy = 8; avy <= 22; avy++) sim.setCell(16, avy, MAT.SAND);
+for (var avs = 0; avs < 80; avs++) sim.step();
+var avCols = {};
+for (var avy2 = 0; avy2 < 23; avy2++) {
+  for (var avx2 = 0; avx2 < 32; avx2++) {
+    if (sim.getCell(avx2, avy2) === MAT.SAND) avCols[avx2] = true;
+  }
+}
+assertEqual(sim.countMaterial(MAT.SAND), 15, "avalanche conserves sand");
+assertGt(Object.keys(avCols).length, 3, "steep sand tower avalanches into a wider pile");
+
+// Horizontal density sort: side-by-side oil|water stripes unmix
+sim.clear();
+for (var htx = 8; htx <= 23; htx++) {
+  sim.setCell(htx, 18, MAT.WALL);
+  sim.setCell(htx, 22, MAT.WALL);
+}
+for (var hty = 19; hty <= 21; hty++) {
+  sim.setCell(8, hty, MAT.WALL);
+  sim.setCell(23, hty, MAT.WALL);
+}
+// Alternating columns of oil and water (should sort: water down/right-ish, oil up)
+for (var hcx = 9; hcx <= 22; hcx++) {
+  for (var hcy = 19; hcy <= 21; hcy++) {
+    sim.setCell(hcx, hcy, hcx % 2 === 0 ? MAT.OIL : MAT.WATER);
+  }
+}
+for (var hs = 0; hs < 120; hs++) sim.step();
+var oilTop = 0;
+var waterBot = 0;
+for (var hlx = 10; hlx <= 21; hlx++) {
+  if (sim.getCell(hlx, 19) === MAT.OIL) oilTop++;
+  if (sim.getCell(hlx, 21) === MAT.WATER) waterBot++;
+}
+assertGt(oilTop, 4, "horizontal sort lifts oil toward top row");
+assertGt(waterBot, 4, "horizontal sort drops water toward bottom row");
+
+// Wind can push steam through residual fire (air-displaceable)
+sim.clear();
+for (var wwx = 2; wwx <= 20; wwx++) {
+  sim.setCell(wwx, 8, MAT.WALL);
+  sim.setCell(wwx, 12, MAT.WALL);
+}
+sim.setCell(2, 9, MAT.WALL);
+sim.setCell(2, 10, MAT.WALL);
+sim.setCell(2, 11, MAT.WALL);
+sim.setCell(20, 9, MAT.WALL);
+sim.setCell(20, 10, MAT.WALL);
+sim.setCell(20, 11, MAT.WALL);
+// Fan on the left blowing east, steam at mid, fire corridor beyond
+sim.setCell(3, 10, MAT.FAN, 1); // life 1 = east
+sim.setCell(6, 10, MAT.STEAM);
+sim.setCell(7, 10, MAT.FIRE);
+sim.setCell(8, 10, MAT.FIRE);
+sim.setCell(9, 10, MAT.FIRE);
+var steamReached = false;
+for (var wfs = 0; wfs < 80; wfs++) {
+  sim.step();
+  for (var wrx = 10; wrx <= 18; wrx++) {
+    if (sim.getCell(wrx, 10) === MAT.STEAM || sim.getCell(wrx, 9) === MAT.STEAM || sim.getCell(wrx, 11) === MAT.STEAM) {
+      steamReached = true;
+    }
+  }
+}
+assert(steamReached, "wind pushes steam through fire corridor");
+
+// --- Physics feel pass 3: pressure, falling solids, crush, bubbles ---
+console.log("\n[physics feel 3]");
+
+// Unsupported ice falls (stone does not — terrain)
+sim.clear();
+sim.setCell(10, 5, MAT.ICE);
+sim.setCell(20, 5, MAT.STONE);
+for (var fs = 0; fs < 20; fs++) sim.step();
+assertEqual(sim.getCell(10, 5), MAT.EMPTY, "unsupported ice left its perch");
+assertEqual(sim.countMaterial(MAT.ICE), 1, "ice conserved while falling");
+var iceAtBottom = false;
+for (var ib = 18; ib < 24; ib++) if (sim.getCell(10, ib) === MAT.ICE) iceAtBottom = true;
+assert(iceAtBottom, "unsupported ice falls downward");
+assertEqual(sim.getCell(20, 5), MAT.STONE, "stone stays put as terrain (does not fall)");
+
+// Unsupported wood and glass fall
+sim.clear();
+sim.setCell(8, 4, MAT.WOOD);
+sim.setCell(12, 4, MAT.GLASS);
+for (var fw = 0; fw < 25; fw++) sim.step();
+assertEqual(sim.getCell(8, 4), MAT.EMPTY, "unsupported wood falls");
+assertEqual(sim.getCell(12, 4), MAT.EMPTY, "unsupported glass falls");
+assertEqual(sim.countMaterial(MAT.WOOD), 1, "wood conserved while falling");
+assertEqual(sim.countMaterial(MAT.GLASS), 1, "glass conserved while falling");
+
+// Sand crushes plant beneath it
+sim.clear();
+for (var cfx = 0; cfx < 32; cfx++) sim.setCell(cfx, 23, MAT.WALL);
+sim.setCell(16, 22, MAT.PLANT);
+sim.setCell(16, 20, MAT.SAND);
+sim.setCell(16, 19, MAT.SAND);
+sim.setCell(16, 18, MAT.SAND);
+for (var cr = 0; cr < 40; cr++) sim.step();
+assertEqual(sim.countMaterial(MAT.PLANT), 0, "sand crushes plant underneath");
+assertGt(sim.countMaterial(MAT.SAND), 0, "sand remains after crushing plant");
+
+// Steam bubbles up through oil (any liquid, not only water)
+sim.clear();
+for (var sbx = 5; sbx <= 15; sbx++) {
+  sim.setCell(sbx, 8, MAT.WALL);
+  sim.setCell(sbx, 18, MAT.WALL);
+}
+for (var sby = 9; sby <= 17; sby++) {
+  sim.setCell(5, sby, MAT.WALL);
+  sim.setCell(15, sby, MAT.WALL);
+}
+for (var soy = 12; soy <= 17; soy++)
+  for (var sox = 6; sox <= 14; sox++) sim.setCell(sox, soy, MAT.OIL);
+sim.setCell(10, 16, MAT.STEAM);
+var steamTop = false;
+for (var sbs = 0; sbs < 60; sbs++) {
+  sim.step();
+  for (var sty = 9; sty <= 12; sty++) {
+    for (var stx = 6; stx <= 14; stx++) {
+      if (sim.getCell(stx, sty) === MAT.STEAM) steamTop = true;
+    }
+  }
+}
+assert(steamTop, "steam bubbles up through oil");
+
+// Deep water column under pressure spreads wider than a single drop stack would imply
+sim.clear();
+for (var p3x = 0; p3x < 32; p3x++) sim.setCell(p3x, 23, MAT.WALL);
+// Tall sealed-ish pour: many water cells stacked then free to spread
+for (var p3y = 5; p3y <= 22; p3y++) sim.setCell(16, p3y, MAT.WATER);
+for (var p3s = 0; p3s < 100; p3s++) sim.step();
+var p3min = 32;
+var p3max = 0;
+var p3count = 0;
+for (var p3yy = 0; p3yy < 23; p3yy++) {
+  for (var p3xx = 0; p3xx < 32; p3xx++) {
+    if (sim.getCell(p3xx, p3yy) === MAT.WATER) {
+      p3count++;
+      if (p3xx < p3min) p3min = p3xx;
+      if (p3xx > p3max) p3max = p3xx;
+    }
+  }
+}
+assertEqual(p3count, 18, "pressurized water conserved");
+assertGt(p3max - p3min, 10, "liquid pressure helps a tall water column spread wide");
 
 // --- paint API ---
 console.log("\n[paint]");
