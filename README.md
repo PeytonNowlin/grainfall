@@ -4,6 +4,8 @@ A browser falling-sand sandbox. Paint powders, fluids, fire, creatures, and oddi
 
 **Play now:** [grainfall.vercel.app](https://grainfall.vercel.app/)
 
+**Open source** under the [MIT License](LICENSE) — contributions are welcome. Fork it, open issues, send pull requests.
+
 Inspired by the falling-sand toys that flooded the early 2000s web. Original mechanics throughout.
 
 Runs fully offline. No build step, no bundler, no server required.
@@ -40,7 +42,7 @@ npm start
 | **Solids** | Wall, stone, plant, ice, wood, glass, clone, torch, fan, metal |
 | **Gases** | Fire, steam, gas |
 | **Creatures** | Ant, bird, fighter |
-| **Special** | Thunder · Erase |
+| **Special** | Lightning · Erase |
 
 ### What happens when…
 
@@ -56,7 +58,7 @@ npm start
 - **Virus** infects what it touches; fire cures it
 - **Fans** blow wind in the direction you drag the stroke
 - **Ants** tunnel through soft materials; **birds** fly; **fighters** patrol and lob fire
-- **Metal** conducts electricity; **thunder** sparks the grid
+- **Metal / water / mercury** conduct electricity; **lightning** falls as a bolt — fuses sand into glass (fulgurites), cracks ice and glass, charges conductors, and ignites fuels
 
 ## Develop
 
@@ -72,6 +74,19 @@ npm run test:browser  # Playwright headless (needs `npx playwright install chrom
 | `js/app.js` | UI, input, render loop |
 | `css/style.css` | Layout and chrome |
 
+## Contribute
+
+Grainfall is open source and built for tinkering. Ideas for materials, reactions, tools, UI polish, bug fixes, and performance are all fair game.
+
+1. Fork [PeytonNowlin/grainfall](https://github.com/PeytonNowlin/grainfall)
+2. Create a branch for your change
+3. Run `npm test` (and `npm run test:browser` if you touch the UI)
+4. Open a pull request describing what you changed and why
+
+New materials usually start in `js/materials.js` (id, color, palette entry, type flags), then get behavior in `js/sim.js`. UI wiring lives in `js/app.js`.
+
+Questions or ideas without a patch yet? [Open an issue](https://github.com/PeytonNowlin/grainfall/issues).
+
 ## License
 
-Personal / hobby project. Inspired by the early-2000s falling-sand genre.
+[MIT](LICENSE) — free to use, modify, and share. Inspired by the early-2000s falling-sand genre.

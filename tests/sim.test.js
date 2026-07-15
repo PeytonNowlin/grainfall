@@ -809,14 +809,13 @@ for (var ib = 18; ib < 24; ib++) if (sim.getCell(10, ib) === MAT.ICE) iceAtBotto
 assert(iceAtBottom, "unsupported ice falls downward");
 assertEqual(sim.getCell(20, 5), MAT.STONE, "stone stays put as terrain (does not fall)");
 
-// Unsupported wood and glass fall
+// Wood stays put as structure (you can build houses); glass still falls
 sim.clear();
 sim.setCell(8, 4, MAT.WOOD);
 sim.setCell(12, 4, MAT.GLASS);
 for (var fw = 0; fw < 25; fw++) sim.step();
-assertEqual(sim.getCell(8, 4), MAT.EMPTY, "unsupported wood falls");
+assertEqual(sim.getCell(8, 4), MAT.WOOD, "wood stays put as buildable structure");
 assertEqual(sim.getCell(12, 4), MAT.EMPTY, "unsupported glass falls");
-assertEqual(sim.countMaterial(MAT.WOOD), 1, "wood conserved while falling");
 assertEqual(sim.countMaterial(MAT.GLASS), 1, "glass conserved while falling");
 
 // Sand crushes plant beneath it
@@ -874,6 +873,123 @@ for (var p3yy = 0; p3yy < 23; p3yy++) {
 }
 assertEqual(p3count, 18, "pressurized water conserved");
 assertGt(p3max - p3min, 10, "liquid pressure helps a tall water column spread wide");
+
+// --- Physics feel pass 4: ice slip, ceiling crawl, quench, mercury crush ---
+console.log("\n[physics feel 4]");
+
+// Sand slides farther on ice than on stone
+sim.clear();
+for (var i4x = 0; i4x < 32; i4x++) sim.setCell(i4x, 23, MAT.WALL);
+for (var i4i = 4; i4i <= 28; i4i++) sim.setCell(i4i, 22, MAT.ICE);
+// Drop a short stack of sand on the ice sheet
+for (var i4d = 0; i4d < 12; i4d++) {
+  if (sim.getCell(16, 10) === MAT.EMPTY) sim.setCell(16, 10, MAT.SAND);
+  for (var i4s = 0; i4s < 3; i4s++) sim.step();
+}
+for (var i4settle = 0; i4settle < 100; i4settle++) sim.step();
+var iceSandMin = 32;
+var iceSandMax = 0;
+var iceSandN = 0;
+for (var i4y = 0; i4y < 23; i4y++) {
+  for (var i4x2 = 0; i4x2 < 32; i4x2++) {
+    if (sim.getCell(i4x2, i4y) === MAT.SAND) {
+      iceSandN++;
+      if (i4x2 < iceSandMin) iceSandMin = i4x2;
+      if (i4x2 > iceSandMax) iceSandMax = i4x2;
+    }
+  }
+}
+var iceSpan = iceSandMax - iceSandMin;
+// Control: same pour on stone floor
+sim.clear();
+for (var st4x = 0; st4x < 32; st4x++) {
+  sim.setCell(st4x, 23, MAT.WALL);
+  if (st4x >= 4 && st4x <= 28) sim.setCell(st4x, 22, MAT.STONE);
+}
+for (var st4d = 0; st4d < 12; st4d++) {
+  if (sim.getCell(16, 10) === MAT.EMPTY) sim.setCell(16, 10, MAT.SAND);
+  for (var st4s = 0; st4s < 3; st4s++) sim.step();
+}
+for (var st4settle = 0; st4settle < 100; st4settle++) sim.step();
+var stoneSandMin = 32;
+var stoneSandMax = 0;
+for (var st4y = 0; st4y < 23; st4y++) {
+  for (var st4x2 = 0; st4x2 < 32; st4x2++) {
+    if (sim.getCell(st4x2, st4y) === MAT.SAND) {
+      if (st4x2 < stoneSandMin) stoneSandMin = st4x2;
+      if (st4x2 > stoneSandMax) stoneSandMax = st4x2;
+    }
+  }
+}
+var stoneSpan = stoneSandMax - stoneSandMin;
+assertEqual(iceSandN, 12, "sand on ice conserved");
+assertGt(iceSpan, stoneSpan, "sand slides farther on ice than on stone (ice=" + iceSpan + " stone=" + stoneSpan + ")");
+
+// Gas crawls under a ceiling instead of staying in one pocket
+sim.clear();
+for (var g4x = 2; g4x <= 20; g4x++) {
+  sim.setCell(g4x, 5, MAT.WALL); // ceiling
+  sim.setCell(g4x, 12, MAT.WALL); // floor
+}
+sim.setCell(2, 6, MAT.WALL);
+sim.setCell(2, 7, MAT.WALL);
+sim.setCell(2, 8, MAT.WALL);
+sim.setCell(2, 9, MAT.WALL);
+sim.setCell(2, 10, MAT.WALL);
+sim.setCell(2, 11, MAT.WALL);
+sim.setCell(20, 6, MAT.WALL);
+sim.setCell(20, 7, MAT.WALL);
+sim.setCell(20, 8, MAT.WALL);
+sim.setCell(20, 9, MAT.WALL);
+sim.setCell(20, 10, MAT.WALL);
+sim.setCell(20, 11, MAT.WALL);
+// Pocket of gas under left side of ceiling
+sim.setCell(4, 6, MAT.GAS);
+sim.setCell(5, 6, MAT.GAS);
+sim.setCell(4, 7, MAT.GAS);
+var gasCols = {};
+for (var g4s = 0; g4s < 80; g4s++) {
+  sim.step();
+  for (var g4x2 = 3; g4x2 <= 19; g4x2++) {
+    if (sim.getCell(g4x2, 6) === MAT.GAS || sim.getCell(g4x2, 7) === MAT.GAS) gasCols[g4x2] = true;
+  }
+}
+assertGt(Object.keys(gasCols).length, 3, "gas crawls along the ceiling across multiple columns");
+
+// Fire submerged in water is quenched (steam or gone)
+sim.clear();
+for (var q4x = 5; q4x <= 15; q4x++) {
+  for (var q4y = 10; q4y <= 16; q4y++) sim.setCell(q4x, q4y, MAT.WATER);
+}
+sim.setCell(10, 13, MAT.FIRE);
+sim.setCell(10, 12, MAT.FIRE);
+for (var q4s = 0; q4s < 25; q4s++) sim.step();
+assertEqual(sim.countMaterial(MAT.FIRE), 0, "submerged fire is quenched");
+assert(
+  sim.countMaterial(MAT.STEAM) > 0 || sim.countMaterial(MAT.WATER) > 0,
+  "quench leaves steam and/or water"
+);
+
+// Mercury crushes plant underneath
+sim.clear();
+for (var m4x = 0; m4x < 32; m4x++) sim.setCell(m4x, 23, MAT.WALL);
+sim.setCell(16, 22, MAT.PLANT);
+sim.setCell(16, 20, MAT.MERCURY);
+for (var m4s = 0; m4s < 30; m4s++) sim.step();
+assertEqual(sim.countMaterial(MAT.PLANT), 0, "mercury crushes plant underneath");
+assertEqual(sim.countMaterial(MAT.MERCURY), 1, "mercury conserved after crush");
+
+// Steam condenses on ice (ice supported so it does not fall away)
+sim.clear();
+sim.setCell(10, 12, MAT.WALL);
+sim.setCell(10, 11, MAT.ICE);
+sim.setCell(10, 10, MAT.STEAM); // steam under the ice ceiling
+var condensed = false;
+for (var c4s = 0; c4s < 40; c4s++) {
+  sim.step();
+  if (sim.countMaterial(MAT.WATER) > 0) condensed = true;
+}
+assert(condensed, "steam condenses into water on ice");
 
 // --- paint API ---
 console.log("\n[paint]");

@@ -126,9 +126,8 @@
   DIGGABLE[MAT.SNOW] = true;
   DIGGABLE[MAT.GUNPOWDER] = true;
 
-  // Solids that fall when unsupported (stone/metal/wall stay as terrain/structure).
+  // Solids that fall when unsupported (wood/stone/metal/wall stay as buildable structure).
   var FALLING_SOLID = {};
-  FALLING_SOLID[MAT.WOOD] = true;
   FALLING_SOLID[MAT.ICE] = true;
   FALLING_SOLID[MAT.GLASS] = true;
 
@@ -1064,8 +1063,10 @@
 
       // Unsupported 1-wide columns always tumble (prevents thin spires).
       // Supported grains stick more often so piles form stable slopes.
+      // Ice is slick — powders barely stick and slide off.
+      var onIce = below === MAT.ICE;
       var supported = powderHasSupport(x, y, m);
-      if (supported) {
+      if (supported && !onIce) {
         var stick =
           damp ? 0.8 : m === MAT.SAND ? 0.42 : m === MAT.SNOW ? 0.5 : 0.22;
         if (rand() < stick) return;
@@ -1073,22 +1074,32 @@
 
       // Prefer the diagonal that packs against existing powder (wider base).
       var dir = randBool() ? 1 : -1;
-      var leftPack =
-        cellAt(x - 1, y) === m ||
-        cellAt(x - 1, y + 1) === m ||
-        cellAt(x - 2, y + 1) === m;
-      var rightPack =
-        cellAt(x + 1, y) === m ||
-        cellAt(x + 1, y + 1) === m ||
-        cellAt(x + 2, y + 1) === m;
-      if (leftPack && !rightPack) dir = -1;
-      else if (rightPack && !leftPack) dir = 1;
+      if (onIce) {
+        // Always prefer the open diagonal when on ice
+        dir = randBool() ? 1 : -1;
+      } else {
+        var leftPack =
+          cellAt(x - 1, y) === m ||
+          cellAt(x - 1, y + 1) === m ||
+          cellAt(x - 2, y + 1) === m;
+        var rightPack =
+          cellAt(x + 1, y) === m ||
+          cellAt(x + 1, y + 1) === m ||
+          cellAt(x + 2, y + 1) === m;
+        if (leftPack && !rightPack) dir = -1;
+        else if (rightPack && !leftPack) dir = 1;
+      }
 
-      // Damp sand slips less often even when unsupported.
-      if (damp && rand() < 0.45) return;
+      // Damp sand slips less often even when unsupported (ice overrides).
+      if (damp && !onIce && rand() < 0.45) return;
 
       if (trySink(x, y, x + dir, y + 1)) return;
       trySink(x, y, x - dir, y + 1);
+      // Ice: also try pure sideways slip along the surface
+      if (onIce) {
+        if (tryMoveEmpty(x, y, x + dir, y)) return;
+        tryMoveEmpty(x, y, x - dir, y);
+      }
     }
 
     function flowSideways(x, y, spread) {
@@ -1123,7 +1134,7 @@
     }
 
     /**
-     * Wood / ice / glass fall when unsupported. Stone, metal, wall stay painted terrain.
+     * Ice / glass fall when unsupported. Wood, stone, metal, wall stay as buildable structure.
      * Falls into empty/gas; slowly sinks through liquids; diagonal slip off ledges.
      */
     function updateFallingSolid(x, y) {
@@ -1138,7 +1149,7 @@
         swapCells(i, idx(x, y + 1));
         return;
       }
-      // Crush soft stuff underneath (ice/wood/glass landing on plants)
+      // Crush soft stuff underneath (ice/glass landing on plants)
       if (CRUSHABLE[below] && rand() < 0.5) {
         become(idx(x, y + 1), MAT.EMPTY, 0);
         swapCells(i, idx(x, y + 1));
@@ -1159,12 +1170,15 @@
       if (m === MAT.ACID && acidReact(x, y)) return;
       if (windPush(x, y, 0.3)) return;
 
-      // Dense liquids crush soft materials beneath them
+      // Dense liquids crush soft materials beneath them (mercury almost always wins)
       var belowSoft = cellAt(x, y + 1);
-      if (CRUSHABLE[belowSoft] && DENSITY[m] >= DENSITY[MAT.WATER] && rand() < 0.35) {
-        become(idx(x, y + 1), MAT.EMPTY, 0);
-        swapCells(idx(x, y), idx(x, y + 1));
-        return;
+      if (CRUSHABLE[belowSoft] && DENSITY[m] >= DENSITY[MAT.WATER]) {
+        var crushChance = DENSITY[m] >= 150 ? 0.95 : 0.55;
+        if (rand() < crushChance) {
+          become(idx(x, y + 1), MAT.EMPTY, 0);
+          swapCells(idx(x, y), idx(x, y + 1));
+          return;
+        }
       }
 
       // Buoyancy: lighter liquid trapped under a heavier one bubbles up (oil on water).
@@ -1233,11 +1247,41 @@
       }
     }
 
+    /** Crawl under a solid ceiling when blocked from rising. */
+    function ceilingCrawl(x, y) {
+      var above = cellAt(x, y - 1);
+      if (!(M.isSolid(above) || above === MAT.WALL)) return false;
+      var dir = randBool() ? 1 : -1;
+      if (tryMoveEmpty(x, y, x + dir, y)) return true;
+      if (tryMoveEmpty(x, y, x - dir, y)) return true;
+      // Slip into a gap under the ceiling
+      if (tryMoveEmpty(x, y, x + dir, y - 1)) return true;
+      if (tryMoveEmpty(x, y, x - dir, y - 1)) return true;
+      return false;
+    }
+
     function updateFire(x, y) {
       var i = idx(x, y);
       if (life[i] > 0) life[i]--;
       if (life[i] === 0) {
         become(i, MAT.EMPTY, 0);
+        return;
+      }
+
+      // Submerged flames die fast (water/oil/etc. smother)
+      var submerged = 0;
+      if (M.isLiquid(cellAt(x + 1, y))) submerged++;
+      if (M.isLiquid(cellAt(x - 1, y))) submerged++;
+      if (M.isLiquid(cellAt(x, y + 1))) submerged++;
+      if (M.isLiquid(cellAt(x, y - 1))) submerged++;
+      if (submerged >= 2 && rand() < 0.45) {
+        // Wet quench → steam if water is involved
+        var makeSteam =
+          cellAt(x + 1, y) === MAT.WATER ||
+          cellAt(x - 1, y) === MAT.WATER ||
+          cellAt(x, y + 1) === MAT.WATER ||
+          cellAt(x, y - 1) === MAT.WATER;
+        become(i, makeSteam ? MAT.STEAM : MAT.EMPTY, makeSteam ? 40 + ((rand() * 30) | 0) : 0);
         return;
       }
 
@@ -1256,6 +1300,7 @@
       }
 
       if (windPush(x, y, 1.2)) return;
+      if (ceilingCrawl(x, y)) return;
       var dir = randBool() ? 1 : -1;
       if (rand() < 0.8) {
         if (tryMoveEmpty(x, y, x, y - 1)) return;
@@ -1271,6 +1316,17 @@
         become(i, rand() < 0.35 ? MAT.WATER : MAT.EMPTY, 0);
         return;
       }
+      // Condenses quickly on cold surfaces
+      if (
+        (cellAt(x, y - 1) === MAT.ICE ||
+          cellAt(x, y + 1) === MAT.ICE ||
+          cellAt(x - 1, y) === MAT.ICE ||
+          cellAt(x + 1, y) === MAT.ICE) &&
+        rand() < 0.2
+      ) {
+        become(i, MAT.WATER, 0);
+        return;
+      }
       // Bubble up through any liquid (not only water)
       if (M.isLiquid(cellAt(x, y - 1)) && rand() < 0.55) {
         swapCells(i, idx(x, y - 1));
@@ -1280,15 +1336,15 @@
       if (M.isLiquid(cellAt(x, y - 1))) {
         var sdir = randBool() ? 1 : -1;
         if (M.isLiquid(cellAt(x + sdir, y - 1)) || cellAt(x + sdir, y - 1) === MAT.EMPTY) {
-          if (tryMoveEmpty(x, y, x + sdir, y - 1) || (M.isLiquid(cellAt(x + sdir, y - 1)) && rand() < 0.4)) {
-            if (M.isLiquid(cellAt(x + sdir, y - 1))) {
-              swapCells(i, idx(x + sdir, y - 1));
-              return;
-            }
+          if (M.isLiquid(cellAt(x + sdir, y - 1)) && rand() < 0.4) {
+            swapCells(i, idx(x + sdir, y - 1));
+            return;
           }
+          if (tryMoveEmpty(x, y, x + sdir, y - 1)) return;
         }
       }
       if (windPush(x, y, 1.2)) return;
+      if (ceilingCrawl(x, y)) return;
       var dir = randBool() ? 1 : -1;
       if (rand() < 0.75) {
         if (tryMoveEmpty(x, y, x, y - 1)) return;
@@ -1305,6 +1361,7 @@
         return;
       }
       if (windPush(x, y, 1.2)) return;
+      if (ceilingCrawl(x, y)) return;
       var dir = randBool() ? 1 : -1;
       if (rand() < 0.6) {
         if (tryMoveEmpty(x, y, x, y - 1)) return;
@@ -1323,8 +1380,8 @@
         case MAT.WALL:
         case MAT.STONE:
         case MAT.METAL:
-          return;
         case MAT.WOOD:
+          return;
         case MAT.GLASS:
           updateFallingSolid(x, y);
           return;
