@@ -313,23 +313,6 @@
     }
   });
 
-  // Seed a small demo so first open isn't blank
-  function seedDemo() {
-    var mid = (GRID_W / 2) | 0;
-    for (var x = 40; x < GRID_W - 40; x++) {
-      sim.setCell(x, GRID_H - 8, MAT.WALL);
-      sim.setCell(x, GRID_H - 7, MAT.WALL);
-    }
-    // Sand heap source area
-    for (var i = 0; i < 80; i++) {
-      sim.setCell(mid - 20 + (i % 40), 20 + ((i / 40) | 0), MAT.SAND);
-    }
-    for (var j = 0; j < 40; j++) {
-      sim.setCell(mid + 30 + (j % 15), 30, MAT.WATER);
-    }
-  }
-  seedDemo();
-
   // Outline preview of the shape being dragged, drawn over the blitted grid.
   function drawPreview() {
     if (!shape) return;
