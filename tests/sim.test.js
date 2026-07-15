@@ -999,6 +999,23 @@ assertGt(sim.countMaterial(MAT.SAND), 1, "paint places multiple cells with brush
 sim.paint(16, 12, MAT.EMPTY, 5);
 assertEqual(sim.countMaterial(MAT.SAND), 0, "erase/paint empty clears cells");
 
+// Overlap off: brush does not replace existing materials
+sim.clear();
+sim.setCell(10, 10, MAT.WALL);
+sim.setCell(11, 10, MAT.WALL);
+sim.paint(10, 10, MAT.SAND, 1, undefined, false);
+assertEqual(sim.getCell(10, 10), MAT.WALL, "no-overlap paint leaves wall intact");
+assertEqual(sim.getCell(11, 10), MAT.WALL, "no-overlap paint leaves nearby wall intact");
+// Empty neighbor of the brush should still receive sand
+assertEqual(sim.getCell(10, 9), MAT.SAND, "no-overlap paint still fills empty cells");
+// Overlap on (default): replaces
+sim.paint(10, 10, MAT.SAND, 0, undefined, true);
+assertEqual(sim.getCell(10, 10), MAT.SAND, "overlap paint replaces wall with sand");
+// Erase always overwrites even when allowOverlap is false
+sim.setCell(10, 10, MAT.WALL);
+sim.paint(10, 10, MAT.EMPTY, 0, undefined, false);
+assertEqual(sim.getCell(10, 10), MAT.EMPTY, "erase clears cells even with overlap off");
+
 // --- Summary ---
 console.log("\n=======================");
 console.log("Passed: " + passed + "  Failed: " + failed);

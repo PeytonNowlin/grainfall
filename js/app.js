@@ -28,6 +28,8 @@
   var SPEEDS = [0.25, 0.5, 1, 2, 4];
   var speed = 1; // sim steps per animation frame (fractional < 1 skips frames)
   var stepAccum = 0;
+  // When true (default), brush overwrites any cell. When false, only empty cells.
+  var allowOverlap = true;
 
   // Restore last-used tool settings (best-effort; localStorage may be blocked on file://).
   var PREFS_KEY = "grainfall.prefs";
@@ -37,6 +39,7 @@
     if (typeof savedPrefs.brushSize === "number") brushSize = Math.max(0, Math.min(12, savedPrefs.brushSize | 0));
     if (SPEEDS.indexOf(savedPrefs.speed) >= 0) speed = savedPrefs.speed;
     if (typeof savedPrefs.tool === "string") tool = savedPrefs.tool;
+    if (typeof savedPrefs.allowOverlap === "boolean") allowOverlap = savedPrefs.allowOverlap;
   } catch (e) {}
 
   var canvas = document.getElementById("sim-canvas");
@@ -46,6 +49,8 @@
   var toolEl = document.getElementById("tools");
   var speedEl = document.getElementById("speed");
   var speedLabel = document.getElementById("speed-label");
+  var overlapEl = document.getElementById("brush-overlap");
+  var overlapLabel = document.getElementById("overlap-label");
   var clearBtn = document.getElementById("btn-clear");
   var pauseBtn = document.getElementById("btn-pause");
   var saveBtn = document.getElementById("btn-save");
@@ -219,6 +224,20 @@
     syncSpeed();
   }
 
+  // --- Brush overlap toggle ---
+  function syncOverlapUi() {
+    if (overlapEl) overlapEl.checked = allowOverlap;
+    if (overlapLabel) overlapLabel.textContent = allowOverlap ? "On" : "Off";
+  }
+  if (overlapEl) {
+    overlapEl.checked = allowOverlap;
+    overlapEl.addEventListener("change", function () {
+      allowOverlap = !!overlapEl.checked;
+      syncOverlapUi();
+    });
+    syncOverlapUi();
+  }
+
   if (clearBtn) {
     clearBtn.addEventListener("click", function () {
       sim.clear();
@@ -272,7 +291,10 @@
   }
 
   function dab(x, y) {
-    sim.paint(x, y, currentMat(), brushSize, paintData());
+    // Erase always overwrites; otherwise honor the Overlap setting.
+    var mat = currentMat();
+    var overlap = allowOverlap || mat === MAT.EMPTY || erasing;
+    sim.paint(x, y, mat, brushSize, paintData(), overlap);
   }
 
   // Paint a straight line of brush dabs between two grid points.
@@ -329,7 +351,9 @@
       return;
     }
     if (tool === "fill") {
-      sim.fill(p.x, p.y, currentMat() === MAT.EMPTY ? -1 : currentMat());
+      var fillMat = currentMat() === MAT.EMPTY ? -1 : currentMat();
+      var fillOverlap = allowOverlap || fillMat === -1 || fillMat === MAT.EMPTY || erasing;
+      sim.fill(p.x, p.y, fillMat, fillOverlap);
       return;
     }
     // Shift turns freehand into a straight line
@@ -392,7 +416,13 @@
     try {
       localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ selected: selected, brushSize: brushSize, speed: speed, tool: tool })
+        JSON.stringify({
+          selected: selected,
+          brushSize: brushSize,
+          speed: speed,
+          tool: tool,
+          allowOverlap: allowOverlap,
+        })
       );
     } catch (e) {}
   });

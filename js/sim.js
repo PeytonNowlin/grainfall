@@ -284,14 +284,24 @@
       return pushed;
     }
 
-    function paint(cx, cy, mat, radius, lifeVal) {
+    /**
+     * Paint a circular brush dab.
+     * @param {boolean} [allowOverlap=true] when false, only write into EMPTY cells
+     *   (erase / EMPTY always overwrites so right-drag erase still works).
+     */
+    function paint(cx, cy, mat, radius, lifeVal, allowOverlap) {
       var r = Math.max(0, radius | 0);
       var r2 = r * r;
       var m = mat === -1 ? MAT.EMPTY : mat;
+      var replace = allowOverlap !== false || m === MAT.EMPTY;
       for (var dy = -r; dy <= r; dy++) {
         for (var dx = -r; dx <= r; dx++) {
           if (dx * dx + dy * dy > r2) continue;
-          setCell(cx + dx, cy + dy, m, lifeVal);
+          var nx = cx + dx;
+          var ny = cy + dy;
+          if (!inBounds(nx, ny)) continue;
+          if (!replace && grid[idx(nx, ny)] !== MAT.EMPTY) continue;
+          setCell(nx, ny, m, lifeVal);
         }
       }
     }
@@ -1719,12 +1729,18 @@
       }
     }
 
-    /** Flood-fill the contiguous region of the clicked material with mat. */
-    function fill(cx, cy, mat) {
+    /**
+     * Flood-fill the contiguous region of the clicked material with mat.
+     * @param {boolean} [allowOverlap=true] when false, only fill EMPTY regions
+     *   (cannot replace existing materials; erase still works).
+     */
+    function fill(cx, cy, mat, allowOverlap) {
       if (!inBounds(cx, cy)) return;
       var m = mat === -1 ? MAT.EMPTY : mat & 0xff;
       var target = grid[idx(cx, cy)];
       if (target === m) return;
+      // No-overlap: only paint into empty space (erase may still replace).
+      if (allowOverlap === false && m !== MAT.EMPTY && target !== MAT.EMPTY) return;
       var stack = [cx, cy];
       while (stack.length) {
         var y = stack.pop();
