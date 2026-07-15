@@ -267,6 +267,16 @@
     e.preventDefault();
     erasing = e.button === 2; // right button erases
     var p = clientToGrid(e.clientX, e.clientY);
+    // Alt+click = eyedropper: adopt whatever material is under the cursor.
+    if (e.altKey) {
+      erasing = false;
+      var picked = sim.getCell(p.x, p.y);
+      if (picked !== MAT.EMPTY) {
+        selected = picked;
+        buildPalette();
+      }
+      return;
+    }
     if (tool === "fill") {
       sim.fill(p.x, p.y, currentMat() === MAT.EMPTY ? -1 : currentMat());
       return;
@@ -486,6 +496,6 @@
 
   if (hintEl) {
     hintEl.textContent =
-      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · ←/→ cycle materials · F/L/B/O/G tools · Space pause · C clear · S save PNG · 1–9 materials";
+      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · Alt+click pick material · ←/→ cycle materials · F/L/B/O/G tools · Space pause · C clear · S save PNG · 1–9 materials";
   }
 })();
