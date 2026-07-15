@@ -442,6 +442,20 @@
     a.click();
   }
 
+  // Dim the canvas and label it while paused, so a frozen sim reads as intentional.
+  function drawPausedOverlay() {
+    if (!paused) return;
+    ctx.save();
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    ctx.fillRect(0, 0, GRID_W, GRID_H);
+    ctx.fillStyle = "rgba(232, 236, 244, 0.92)";
+    ctx.font = "bold 24px " + "sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("PAUSED", GRID_W / 2, GRID_H / 2);
+    ctx.restore();
+  }
+
   // --- Main loop ---
   function frame() {
     if (!paused) {
@@ -459,6 +473,7 @@
     ctx.putImageData(imageData, 0, 0);
     drawPreview();
     drawCursor();
+    drawPausedOverlay();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
