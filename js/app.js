@@ -29,6 +29,16 @@
   var speed = 1; // sim steps per animation frame (fractional < 1 skips frames)
   var stepAccum = 0;
 
+  // Restore last-used tool settings (best-effort; localStorage may be blocked on file://).
+  var PREFS_KEY = "grainfall.prefs";
+  try {
+    var savedPrefs = JSON.parse(localStorage.getItem(PREFS_KEY) || "{}");
+    if (typeof savedPrefs.selected === "number") selected = savedPrefs.selected;
+    if (typeof savedPrefs.brushSize === "number") brushSize = Math.max(0, Math.min(12, savedPrefs.brushSize | 0));
+    if (SPEEDS.indexOf(savedPrefs.speed) >= 0) speed = savedPrefs.speed;
+    if (typeof savedPrefs.tool === "string") tool = savedPrefs.tool;
+  } catch (e) {}
+
   var canvas = document.getElementById("sim-canvas");
   var paletteEl = document.getElementById("palette");
   var brushEl = document.getElementById("brush-size");
@@ -147,7 +157,7 @@
   if (speedEl) {
     speedEl.min = "0";
     speedEl.max = String(SPEEDS.length - 1);
-    speedEl.value = String(SPEEDS.indexOf(1));
+    speedEl.value = String(SPEEDS.indexOf(speed));
     function syncSpeed() {
       speed = SPEEDS[parseInt(speedEl.value, 10) || 0];
       if (speedLabel) speedLabel.textContent = speed + "×";
@@ -300,6 +310,16 @@
     },
     { passive: false }
   );
+
+  // Persist tool settings on exit (best-effort).
+  window.addEventListener("beforeunload", function () {
+    try {
+      localStorage.setItem(
+        PREFS_KEY,
+        JSON.stringify({ selected: selected, brushSize: brushSize, speed: speed, tool: tool })
+      );
+    } catch (e) {}
+  });
 
   // Keyboard shortcuts 1-9
   window.addEventListener("keydown", function (e) {
