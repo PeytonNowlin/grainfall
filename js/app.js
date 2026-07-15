@@ -394,10 +394,16 @@
   function drawPreview() {
     if (!shape) return;
     var c = M.colorFor(selected === MAT.EMPTY ? MAT.WALL : selected);
+    var rgb = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
     ctx.save();
-    ctx.globalAlpha = 0.7;
-    ctx.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
     ctx.lineWidth = Math.max(1, brushSize);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    // Soft glow under the crisp stroke
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = rgb;
+    ctx.shadowColor = rgb;
+    ctx.shadowBlur = 6;
     ctx.beginPath();
     if (shape.kind === "line") {
       ctx.moveTo(shape.x0 + 0.5, shape.y0 + 0.5);
@@ -414,6 +420,9 @@
       ctx.arc(shape.x0 + 0.5, shape.y0 + 0.5, r, 0, Math.PI * 2);
     }
     ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.85;
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -421,13 +430,27 @@
   function drawCursor() {
     if (!cursor || shape) return;
     var c = M.colorFor(currentMat() === MAT.EMPTY ? MAT.WALL : currentMat());
+    var rgb = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    var rad = brushSize + 0.5;
     ctx.save();
-    ctx.globalAlpha = 0.6;
-    ctx.strokeStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+    ctx.translate(cursor.x + 0.5, cursor.y + 0.5);
+    // Outer glow
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = rgb;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, rad + 1, 0, Math.PI * 2);
+    ctx.stroke();
+    // Crisp ring
+    ctx.globalAlpha = 0.85;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(cursor.x + 0.5, cursor.y + 0.5, brushSize + 0.5, 0, Math.PI * 2);
+    ctx.arc(0, 0, rad, 0, Math.PI * 2);
     ctx.stroke();
+    // Center pixel hint
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = rgb;
+    ctx.fillRect(-0.5, -0.5, 1, 1);
     ctx.restore();
   }
 
@@ -446,13 +469,37 @@
   function drawPausedOverlay() {
     if (!paused) return;
     ctx.save();
-    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    // Vignette-ish dim
+    ctx.fillStyle = "rgba(8, 10, 16, 0.45)";
     ctx.fillRect(0, 0, GRID_W, GRID_H);
-    ctx.fillStyle = "rgba(232, 236, 244, 0.92)";
-    ctx.font = "bold 24px " + "sans-serif";
+    // Pill behind the label
+    var label = "PAUSED";
+    ctx.font = "bold 22px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("PAUSED", GRID_W / 2, GRID_H / 2);
+    var tw = ctx.measureText(label).width;
+    var px = GRID_W / 2;
+    var py = GRID_H / 2;
+    var padX = 16;
+    var padY = 10;
+    ctx.fillStyle = "rgba(20, 24, 34, 0.82)";
+    ctx.strokeStyle = "rgba(91, 141, 239, 0.45)";
+    ctx.lineWidth = 1;
+    var rw = tw + padX * 2;
+    var rh = 22 + padY * 2;
+    var rx = px - rw / 2;
+    var ry = py - rh / 2;
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(rx, ry, rw, rh, 8);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeRect(rx, ry, rw, rh);
+    }
+    ctx.fillStyle = "rgba(232, 236, 244, 0.95)";
+    ctx.fillText(label, px, py);
     ctx.restore();
   }
 

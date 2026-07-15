@@ -1480,11 +1480,14 @@
         var o = i * 4;
         var ci = m * 4;
         var r, g, b;
+        var n0 = noise[i];
 
         if (m === MAT.EMPTY) {
-          rgba[o] = colors[ci];
-          rgba[o + 1] = colors[ci + 1];
-          rgba[o + 2] = colors[ci + 2];
+          // Soft grain on the void so the stage does not read as flat
+          var eg = (n0 & 7) - 3;
+          rgba[o] = Math.max(0, colors[ci] + eg);
+          rgba[o + 1] = Math.max(0, colors[ci + 1] + eg);
+          rgba[o + 2] = Math.max(0, colors[ci + 2] + eg + ((n0 >> 3) & 1));
           rgba[o + 3] = 255;
           continue;
         }
@@ -1492,33 +1495,61 @@
         if (m === MAT.FIRE) {
           // Hotter (more life) = whiter; flicker via noise + frame
           var t = life[i];
-          var fl = (noise[i] + frame * 11) & 31;
+          var fl = (n0 + frame * 11) & 31;
           r = 255;
           g = Math.min(255, 60 + t * 3 + fl);
           b = Math.max(0, t * 2 - 40 + (fl >> 1));
         } else if (m === MAT.LAVA) {
-          // Slow per-cell glow pulse
-          var p = (noise[i] + frame) & 63;
+          // Slow per-cell glow pulse with occasional bright sparks
+          var p = (n0 + frame) & 63;
           if (p > 31) p = 63 - p;
-          r = Math.min(255, 205 + p + (noise[i] & 15));
-          g = 40 + p + (noise[i] & 7);
+          r = Math.min(255, 205 + p + (n0 & 15));
+          g = 40 + p + (n0 & 7);
           b = 14;
+          if (((n0 + frame * 3) & 63) < 2) {
+            r = 255;
+            g = Math.min(255, 180 + (n0 & 31));
+            b = 40;
+          }
+        } else if (m === MAT.NAPALM) {
+          // Sticky fuel: deep red with hot orange flecks
+          var np = (n0 * 3 + frame * 4) & 31;
+          if (np > 15) np = 31 - np;
+          r = 255;
+          g = 28 + np * 3;
+          b = 18 + np;
+          if ((n0 & 15) < 2) {
+            g = Math.min(255, 120 + np * 4);
+            b = 30;
+          }
         } else if (m === MAT.WATER) {
           if (life[i]) {
-            // Electrified water: bright arc-blue
-            r = 150;
-            g = 230;
+            // Electrified water: bright arc-blue with white core
+            var wh = life[i] === 2;
+            r = wh ? 200 : 120;
+            g = wh ? 245 : 210;
             b = 255;
           } else {
             // Static grain + gentle shimmer
-            var wv = (noise[i] * 3 + frame * 2) & 31;
+            var wv = (n0 * 3 + frame * 2) & 31;
             if (wv > 15) wv = 31 - wv;
-            var dv = (noise[i] % 20) - 10 + wv - 8;
+            var dv = (n0 % 20) - 10 + wv - 8;
             r = Math.max(0, colors[ci] + (dv >> 1));
             g = Math.max(0, Math.min(255, colors[ci + 1] + dv));
             b = Math.max(0, Math.min(255, colors[ci + 2] + dv));
           }
-        } else if (m === MAT.METAL) {
+        } else if (m === MAT.OIL) {
+          // Dark amber with rare iridescent flecks
+          var ov = (n0 % 16) - 8;
+          r = Math.max(0, Math.min(255, 88 + ov));
+          g = Math.max(0, Math.min(255, 62 + ov));
+          b = Math.max(0, Math.min(255, 36 + (ov >> 1)));
+          if (((n0 + frame) & 63) < 3) {
+            r = Math.min(255, r + 50);
+            g = Math.min(255, g + 30);
+            b = Math.min(255, b + 70);
+          }
+        } else if (m === MAT.METAL || (m === MAT.MERCURY && life[i])) {
           if (life[i]) {
             // Charged: white-hot at the head, cyan in the tail
             var head = life[i] === 2;
@@ -1526,16 +1557,29 @@
             g = head ? 250 : 220;
             b = 255;
           } else {
-            var mvv = (noise[i] % 18) - 9;
+            var mvv = (n0 % 18) - 9;
             r = Math.max(0, Math.min(255, colors[ci] + mvv));
             g = Math.max(0, Math.min(255, colors[ci + 1] + mvv));
             b = Math.max(0, Math.min(255, colors[ci + 2] + mvv));
           }
+        } else if (m === MAT.MERCURY) {
+          // Heavy liquid metal shimmer (neutral silver, not glassy blue)
+          var mp = (n0 + frame * 2) & 31;
+          if (mp > 15) mp = 31 - mp;
+          r = 165 + mp * 2;
+          g = 168 + mp * 2;
+          b = 175 + mp * 2;
+          if ((n0 & 31) < 2) {
+            r = g = b = 230;
+          }
         } else if (m === MAT.LIGHTNING) {
-          var tf = (noise[i] + frame * 7) & 31;
+          var tf = (n0 + frame * 7) & 31;
           r = 255;
-          g = 200 + tf;
-          b = 20 + (tf >> 1);
+          g = Math.min(255, 210 + tf);
+          b = 40 + (tf >> 1);
+          if ((frame + n0) & 2) {
+            r = g = b = 255;
+          }
         } else if (m === MAT.STEAM) {
           // Fades toward background as it dissipates
           var st = life[i];
@@ -1545,36 +1589,106 @@
           b = (20 + (190 * k)) | 0;
         } else if (m === MAT.ACID) {
           // Toxic bubbling pulse
-          var ap = (noise[i] * 5 + frame * 3) & 31;
+          var ap = (n0 * 5 + frame * 3) & 31;
           if (ap > 15) ap = 31 - ap;
           r = 130 + ap * 3;
           g = Math.min(255, 225 + ap);
           b = 40 + ap;
-        } else if (m === MAT.MERCURY) {
-          // Heavy liquid metal shimmer (neutral silver, not glassy blue)
-          var mp = (noise[i] + frame * 2) & 31;
-          if (mp > 15) mp = 31 - mp;
-          r = 165 + mp * 2;
-          g = 168 + mp * 2;
-          b = 175 + mp * 2;
         } else if (m === MAT.GAS) {
           // Pale yellow-green fumes (not plant-colored)
-          var gp = (noise[i] * 3 + frame) & 31;
+          var gp = (n0 * 3 + frame) & 31;
           if (gp > 15) gp = 31 - gp;
           r = 145 + gp;
           g = 150 + gp;
           b = 70 + (gp >> 1);
+        } else if (m === MAT.ICE) {
+          // Cold blue crystal with occasional white sparkle
+          var iv = (n0 % 20) - 10;
+          r = Math.max(0, Math.min(255, 145 + iv));
+          g = Math.max(0, Math.min(255, 205 + iv));
+          b = 255;
+          if (((n0 * 3 + frame * 2) & 63) < 3) {
+            r = 230;
+            g = 245;
+            b = 255;
+          }
+        } else if (m === MAT.SNOW) {
+          var sv = (n0 % 14) - 7;
+          r = Math.max(0, Math.min(255, 230 + sv));
+          g = Math.max(0, Math.min(255, 235 + sv));
+          b = Math.max(0, Math.min(255, 245 + sv));
+        } else if (m === MAT.PLANT) {
+          // Leafy variation — darker veins via noise bands
+          var pv = (n0 % 36) - 18;
+          r = Math.max(0, Math.min(255, 48 + pv));
+          g = Math.max(0, Math.min(255, 155 + pv));
+          b = Math.max(0, Math.min(255, 58 + (pv >> 1)));
+          if ((n0 & 15) === 0) {
+            r = Math.max(0, r - 20);
+            g = Math.max(0, g - 30);
+          }
+        } else if (m === MAT.VIRUS) {
+          var vp = (n0 + frame * 5) & 31;
+          if (vp > 15) vp = 31 - vp;
+          r = Math.min(255, 180 + vp * 3);
+          g = 40 + vp;
+          b = Math.min(255, 190 + vp * 2);
+        } else if (m === MAT.CLONE) {
+          // Soft gold pulse once it has learned a material
+          var cp = (n0 + frame * 2) & 31;
+          if (cp > 15) cp = 31 - cp;
+          var learned = life[i] ? 1 : 0;
+          r = 160 + cp + learned * 30;
+          g = 155 + cp + learned * 25;
+          b = 40 + (cp >> 1);
+        } else if (m === MAT.TORCH) {
+          var tp = (n0 + frame * 9) & 31;
+          if (tp > 15) tp = 31 - tp;
+          r = 220 + (tp >> 1);
+          g = 90 + tp * 2;
+          b = 30 + tp;
+        } else if (m === MAT.NITRO) {
+          // Unstable warning pulse
+          var ntp = (n0 + frame * 6) & 31;
+          if (ntp > 15) ntp = 31 - ntp;
+          r = 200 + ntp;
+          g = 200 + ntp;
+          b = 40 + ntp;
+        } else if (m === MAT.GLASS) {
+          // Cool translucent sheen
+          var gv = (n0 % 16) - 8;
+          r = Math.max(0, Math.min(255, 175 + gv));
+          g = Math.max(0, Math.min(255, 200 + gv));
+          b = Math.max(0, Math.min(255, 215 + gv));
+          if ((n0 & 31) < 2) {
+            r = g = b = 245;
+          }
+        } else if (m === MAT.WOOD) {
+          // Vertical-ish grain from noise bands
+          var wd = (n0 % 34) - 17;
+          r = Math.max(0, Math.min(255, 120 + wd));
+          g = Math.max(0, Math.min(255, 80 + wd));
+          b = Math.max(0, Math.min(255, 42 + (wd >> 1)));
+          if ((n0 & 7) === 0) {
+            r = Math.max(0, r - 25);
+            g = Math.max(0, g - 18);
+          }
+        } else if (m === MAT.GUNPOWDER) {
+          var gu = (n0 % 28) - 14;
+          r = Math.max(0, Math.min(255, 62 + gu));
+          g = Math.max(0, Math.min(255, 62 + gu));
+          b = Math.max(0, Math.min(255, 68 + gu));
         } else {
           var vr = VARI[m];
-          var v = vr ? (noise[i] % vr) - (vr >> 1) : 0;
+          var v = vr ? (n0 % vr) - (vr >> 1) : 0;
           r = Math.max(0, Math.min(255, colors[ci] + v));
           g = Math.max(0, Math.min(255, colors[ci + 1] + v));
           b = Math.max(0, Math.min(255, colors[ci + 2] + v));
         }
 
-        rgba[o] = r;
-        rgba[o + 1] = g;
-        rgba[o + 2] = b;
+        rgba[o] = r > 255 ? 255 : r < 0 ? 0 : r;
+        rgba[o + 1] = g > 255 ? 255 : g < 0 ? 0 : g;
+        rgba[o + 2] = b > 255 ? 255 : b < 0 ? 0 : b;
         rgba[o + 3] = 255;
       }
     }
