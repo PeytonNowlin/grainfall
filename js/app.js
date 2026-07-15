@@ -322,6 +322,20 @@
         buildPalette();
       }
     }
+    // Arrow keys step through the whole palette (most materials have no 1-9 hotkey).
+    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+      var cur = selected === MAT.EMPTY ? -1 : selected;
+      var idx = 0;
+      for (var i = 0; i < M.PALETTE.length; i++) {
+        if (M.PALETTE[i].id === cur) { idx = i; break; }
+      }
+      var dir = e.key === "ArrowRight" ? 1 : -1;
+      idx = (idx + dir + M.PALETTE.length) % M.PALETTE.length;
+      var next = M.PALETTE[idx];
+      selected = next.id === -1 ? MAT.EMPTY : next.id;
+      buildPalette();
+      e.preventDefault();
+    }
   });
 
   // Outline preview of the shape being dragged, drawn over the blitted grid.
@@ -426,6 +440,6 @@
 
   if (hintEl) {
     hintEl.textContent =
-      "Drag to paint · Right-drag erase · Shift+drag straight line · Scroll brush · Space pause · C clear · 1–9 materials";
+      "Drag paint · Right-drag erase · Shift+drag line · Scroll brush · ←/→ cycle materials · Space pause · C clear · 1–9 materials";
   }
 })();
