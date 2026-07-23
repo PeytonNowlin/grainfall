@@ -10,7 +10,15 @@ var path = require("path");
 var vm = require("vm");
 
 var root = path.join(__dirname, "..");
-var scripts = ["js/materials.js", "js/sim.js", "js/app.js"];
+var scripts = [
+  "js/materials.js",
+  "js/sim.js",
+  "js/render/gl.js",
+  "js/render/shaders.js",
+  "js/render/effects.js",
+  "js/render/renderer.js",
+  "js/app.js",
+];
 var log = [];
 
 function logLine(s) {
@@ -26,13 +34,47 @@ var canvasStore = {
   width: 480,
   height: 320,
   style: {},
-  getContext: function () {
+  id: "sim-canvas",
+  className: "",
+  parentNode: null,
+  cloneNode: function () {
+    return {
+      width: this.width,
+      height: this.height,
+      id: this.id,
+      className: this.className,
+      style: {},
+      parentNode: this.parentNode,
+      getContext: canvasStore.getContext,
+      getBoundingClientRect: canvasStore.getBoundingClientRect,
+      setPointerCapture: function () {},
+      addEventListener: function () {},
+      cloneNode: canvasStore.cloneNode,
+    };
+  },
+  getContext: function (type) {
+    if (type === "webgl2" || type === "webgl") return null;
     return {
       imageSmoothingEnabled: true,
       createImageData: function (w, h) {
         return { data: new Uint8ClampedArray(w * h * 4), width: w, height: h };
       },
       putImageData: function () {},
+      clearRect: function () {},
+      save: function () {},
+      restore: function () {},
+      beginPath: function () {},
+      moveTo: function () {},
+      lineTo: function () {},
+      rect: function () {},
+      arc: function () {},
+      stroke: function () {},
+      fillRect: function () {},
+      fillText: function () {},
+      measureText: function () {
+        return { width: 40 };
+      },
+      translate: function () {},
     };
   },
   getBoundingClientRect: function () {
@@ -42,8 +84,36 @@ var canvasStore = {
   addEventListener: function () {},
 };
 
+var overlayStore = {
+  width: 480,
+  height: 320,
+  style: {},
+  getContext: function () {
+    return canvasStore.getContext("2d");
+  },
+  getBoundingClientRect: canvasStore.getBoundingClientRect,
+  setPointerCapture: function () {},
+  addEventListener: function () {},
+};
+
+var stageStack = {
+  style: {},
+  clientWidth: 800,
+  clientHeight: 500,
+};
+
 var elements = {
   "sim-canvas": canvasStore,
+  "sim-overlay": overlayStore,
+  "stage-stack": stageStack,
+  "gfx-quality": {
+    value: "high",
+    addEventListener: function () {},
+  },
+  "gfx-status": {
+    hidden: true,
+    textContent: "",
+  },
   palette: {
     innerHTML: "",
     appendChild: function () {},
@@ -63,29 +133,68 @@ var elements = {
     addEventListener: function () {},
     textContent: "",
     setAttribute: function () {},
+    classList: { toggle: function () {}, add: function () {}, remove: function () {} },
   },
+  "btn-save": { addEventListener: function () {} },
+  "btn-share": { addEventListener: function () {}, textContent: "Share" },
+  tools: {
+    appendChild: function () {},
+    querySelectorAll: function () {
+      return [];
+    },
+  },
+  speed: { min: "", max: "", value: "2", addEventListener: function () {} },
+  "speed-label": { textContent: "" },
+  "brush-overlap": { checked: true, addEventListener: function () {} },
+  "overlap-label": { textContent: "" },
+  "selection-swatch": { style: {}, classList: { toggle: function () {} } },
+  "selection-name": { textContent: "" },
+  "selection-chip": { title: "" },
   hint: { textContent: "" },
+  stats: { textContent: "", classList: { toggle: function () {} } },
   stage: { clientWidth: 800, clientHeight: 500 },
 };
+
+canvasStore.parentNode = {
+  replaceChild: function (neu, old) {
+    elements["sim-canvas"] = neu;
+    neu.parentNode = this;
+    neu.parentElement = elements.stage;
+  },
+};
+canvasStore.parentElement = elements.stage;
+stageStack.parentElement = elements.stage;
 
 var windowObj = {
   Materials: undefined,
   GrainfallSim: undefined,
   GrainfallApp: undefined,
+  GrainfallGL: undefined,
+  GrainfallShaders: undefined,
+  GrainfallEffects: undefined,
+  GrainfallRenderer: undefined,
   innerWidth: 1024,
   innerHeight: 768,
+  devicePixelRatio: 1,
   addEventListener: function () {},
-  requestAnimationFrame: function (cb) {
+  requestAnimationFrame: function () {
     return 0;
+  },
+  matchMedia: function () {
+    return {
+      matches: false,
+      addEventListener: function () {},
+      addListener: function () {},
+    };
   },
   console: console,
 };
 
-// Circular: window.window = window
 windowObj.window = windowObj;
 windowObj.globalThis = windowObj;
 
 var documentObj = {
+  body: { classList: { toggle: function () {} } },
   getElementById: function (id) {
     return elements[id] || null;
   },
@@ -100,15 +209,12 @@ var documentObj = {
       appendChild: function () {},
       addEventListener: function () {},
       setAttribute: function () {},
-      classList: { add: function () {}, remove: function () {} },
+      classList: { add: function () {}, remove: function () {}, toggle: function () {} },
     };
   },
 };
 
 windowObj.document = documentObj;
-
-// Parent of canvas
-canvasStore.parentElement = elements.stage;
 
 var context = vm.createContext({
   window: windowObj,
@@ -116,22 +222,20 @@ var context = vm.createContext({
   console: console,
   Uint8Array: Uint8Array,
   Uint8ClampedArray: Uint8ClampedArray,
+  Float32Array: Float32Array,
   Math: Math,
   Array: Array,
   parseInt: parseInt,
   requestAnimationFrame: windowObj.requestAnimationFrame,
-  // Intentionally NO module / require for app path check
+  HTMLCanvasElement: function () {},
 });
 
-// materials and sim check both window and module; hide module for strict browser path
 var failed = 0;
 
 scripts.forEach(function (rel) {
   var filePath = path.join(root, rel);
   var code = fs.readFileSync(filePath, "utf8");
   try {
-    // For materials/sim, they also assign module.exports if module exists.
-    // Ensure module is undefined in this sandbox for browser-like path.
     vm.runInContext(
       "(function(){ var module = undefined; var exports = undefined; var require = undefined;\n" +
         code +
@@ -147,11 +251,10 @@ scripts.forEach(function (rel) {
   }
 });
 
-// After materials + sim, app needs DOM; re-run order: we already ran all three in order
-// But app runs inside IIFE and expects Materials on window
 var Materials = context.window.Materials;
 var Sim = context.window.GrainfallSim;
 var App = context.window.GrainfallApp;
+var Renderer = context.window.GrainfallRenderer;
 
 if (!Materials) {
   failed++;
@@ -159,6 +262,12 @@ if (!Materials) {
 } else {
   logLine("OK: window.Materials present");
   logLine("  MAT.LAVA=" + Materials.MAT.LAVA + " MAT.NAPALM=" + Materials.MAT.NAPALM);
+  if (typeof Materials.buildRenderTextures !== "function") {
+    failed++;
+    logLine("FAIL: Materials.buildRenderTextures missing");
+  } else {
+    logLine("OK: Materials.buildRenderTextures present");
+  }
 }
 
 if (!Sim || typeof Sim.createSim !== "function") {
@@ -169,7 +278,19 @@ if (!Sim || typeof Sim.createSim !== "function") {
   var s = Sim.createSim(8, 8);
   s.setCell(2, 0, Materials.MAT.SAND);
   s.step();
-  logLine("OK: sim step runs under window global");
+  if (typeof s.getRenderState !== "function" || typeof s.drainVisualEvents !== "function") {
+    failed++;
+    logLine("FAIL: sim missing getRenderState/drainVisualEvents");
+  } else {
+    logLine("OK: sim render-state API present");
+  }
+}
+
+if (!Renderer || typeof Renderer.createRenderer !== "function") {
+  failed++;
+  logLine("FAIL: window.GrainfallRenderer missing");
+} else {
+  logLine("OK: window.GrainfallRenderer present");
 }
 
 if (!App || !App.sim) {
@@ -179,6 +300,22 @@ if (!App || !App.sim) {
   logLine("OK: window.GrainfallApp entry hook present");
   logLine("  GRID=" + App.GRID_W + "x" + App.GRID_H);
   logLine("  canvas dims=" + App.canvas.width + "x" + App.canvas.height);
+  if (!App.renderer || !App.renderer.mode) {
+    failed++;
+    logLine("FAIL: GrainfallApp.renderer missing");
+  } else {
+    logLine("OK: renderer mode=" + App.renderer.mode);
+    if (App.renderer.mode !== "canvas2d") {
+      failed++;
+      logLine("FAIL: expected canvas2d fallback in Node sandbox, got " + App.renderer.mode);
+    }
+  }
+  if (!App.overlay) {
+    failed++;
+    logLine("FAIL: GrainfallApp.overlay missing");
+  } else {
+    logLine("OK: overlay canvas hooked");
+  }
 }
 
 // Static HTML checks
@@ -191,11 +328,17 @@ function has(re, name) {
   }
 }
 has(/id=["']sim-canvas["']/, "canvas#sim-canvas");
+has(/id=["']sim-overlay["']/, "canvas#sim-overlay");
+has(/id=["']gfx-quality["']/, "graphics quality control");
 has(/id=["']palette["']/, "palette mount");
 has(/id=["']brush-size["']/, "brush size control");
 has(/id=["']btn-clear["']/, "clear button");
 has(/<script\s+src=["']js\/materials\.js["']/, "plain script materials.js");
 has(/<script\s+src=["']js\/sim\.js["']/, "plain script sim.js");
+has(/<script\s+src=["']js\/render\/gl\.js["']/, "plain script render/gl.js");
+has(/<script\s+src=["']js\/render\/shaders\.js["']/, "plain script render/shaders.js");
+has(/<script\s+src=["']js\/render\/effects\.js["']/, "plain script render/effects.js");
+has(/<script\s+src=["']js\/render\/renderer\.js["']/, "plain script render/renderer.js");
 has(/<script\s+src=["']js\/app\.js["']/, "plain script app.js");
 has(/stylesheet.*css\/style\.css/, "stylesheet linked");
 

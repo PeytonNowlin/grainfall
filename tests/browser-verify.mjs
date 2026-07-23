@@ -1,6 +1,7 @@
 /**
- * Headless browser verification for Grainfall.
- * Serves the static root, loads index.html twice, paints via app API, checks pixels.
+ * Headless browser verification for Grainfall graphics overhaul.
+ * Serves the static root, loads index.html, exercises WebGL (or fallback),
+ * paints via app API, checks pixels / PNG capture / resize.
  */
 import { createServer } from "http";
 import { readFile } from "fs/promises";
@@ -13,7 +14,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 const SCRATCH =
   process.env.SCRATCH ||
-  "/var/folders/vj/bxy_kc3d0f74cd4z9xtq27g00000gn/T/grok-goal-bdbaf8cbd1d3/implementer";
+  path.join(__dirname, "..", ".scratch-browser");
 
 const mime = {
   ".html": "text/html; charset=utf-8",
@@ -53,8 +54,8 @@ async function startServer() {
   return { server, port };
 }
 
-async function runOnce(browser, baseUrl, lines, tag) {
-  const page = await browser.newPage({ viewport: { width: 1100, height: 800 } });
+async function runOnce(browser, baseUrl, lines, tag, viewport) {
+  const page = await browser.newPage({ viewport });
   const pageErrors = [];
   const consoleErrors = [];
   page.on("pageerror", (err) => pageErrors.push(String(err)));
@@ -63,77 +64,135 @@ async function runOnce(browser, baseUrl, lines, tag) {
   });
 
   await page.goto(baseUrl + "/", { waitUntil: "networkidle", timeout: 30000 });
-  await page.waitForFunction(() => window.GrainfallApp && window.GrainfallApp.sim, {
+  await page.waitForFunction(() => window.GrainfallApp && window.GrainfallApp.sim && window.GrainfallApp.renderer, {
     timeout: 10000,
   });
 
-  const dims = await page.evaluate(() => {
-    const c = document.getElementById("sim-canvas");
+  const boot = await page.evaluate(() => {
     const app = window.GrainfallApp;
+    const c = app.canvas;
+    const o = app.overlay;
     return {
+      mode: app.renderer.mode,
+      quality: app.renderer.getQuality(),
       width: c.width,
       height: c.height,
       cssW: c.getBoundingClientRect().width,
       cssH: c.getBoundingClientRect().height,
       gridW: app.GRID_W,
       gridH: app.GRID_H,
+      overlay: !!(o && o.width === app.GRID_W),
+      hasGfxSelect: !!document.getElementById("gfx-quality"),
     };
   });
-  log(`[${tag}] canvas buffer ${dims.width}x${dims.height} css ${dims.cssW.toFixed(0)}x${dims.cssH.toFixed(0)}`, lines);
-  if (dims.width < 100 || dims.height < 100) {
-    throw new Error("Canvas dimensions too small");
-  }
-  if (dims.cssW < 50 || dims.cssH < 50) {
-    throw new Error("Canvas CSS size too small");
-  }
+  log(
+    `[${tag}] mode=${boot.mode} quality=${boot.quality} buffer ${boot.width}x${boot.height} css ${boot.cssW.toFixed(0)}x${boot.cssH.toFixed(0)}`,
+    lines
+  );
+  if (boot.width < 100 || boot.height < 100) throw new Error("Canvas dimensions too small");
+  if (boot.cssW < 50 || boot.cssH < 50) throw new Error("Canvas CSS size too small");
+  if (!boot.overlay) throw new Error("Overlay canvas missing or wrong size");
+  if (!boot.hasGfxSelect) throw new Error("Graphics quality select missing");
 
-  // Pause sim for stable paint measurement, clear, paint sand, step, render
-  const paintResult = await page.evaluate(() => {
+  // Paint sand, step, let the real renderer draw, sample via readback helpers
+  const paintResult = await page.evaluate(async () => {
     const app = window.GrainfallApp;
     const MAT = window.Materials.MAT;
     app.sim.clear();
-    // Force a render tick by stepping and calling render path via canvas
+    app.renderer.resetTemporal();
     app.setSelected(MAT.SAND);
     app.setBrushSize(8);
-    // Paint at center of grid via sim API (same code path as brush)
     app.sim.paint((app.GRID_W / 2) | 0, 40, MAT.SAND, 8);
     for (let i = 0; i < 40; i++) app.sim.step();
-    // Blit using same renderTo
-    const canvas = app.canvas;
-    const ctx = canvas.getContext("2d");
-    const imageData = ctx.createImageData(app.GRID_W, app.GRID_H);
-    app.sim.renderTo(imageData.data);
-    ctx.putImageData(imageData, 0, 0);
-    const data = imageData.data;
+    app.renderer.renderFrame({});
+
+    // CPU reference path still available for pixel accounting
+    const rgba = new Uint8ClampedArray(app.GRID_W * app.GRID_H * 4);
+    app.sim.renderTo(rgba);
     let nonBg = 0;
-    // Background EMPTY color is approx 12,14,20
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i],
-        g = data[i + 1],
-        b = data[i + 2];
+    for (let i = 0; i < rgba.length; i += 4) {
+      const r = rgba[i],
+        g = rgba[i + 1],
+        b = rgba[i + 2];
       if (Math.abs(r - 12) > 8 || Math.abs(g - 14) > 8 || Math.abs(b - 20) > 8) nonBg++;
     }
+
+    // PNG capture from renderer (no overlays)
+    const png = app.renderer.capturePNG();
+    const pngOk = typeof png === "string" && png.indexOf("data:image/png") === 0 && png.length > 500;
+
     return {
       nonBg,
-      total: data.length / 4,
+      total: rgba.length / 4,
       sand: app.sim.countMaterial(MAT.SAND),
-      fraction: nonBg / (data.length / 4),
+      fraction: nonBg / (rgba.length / 4),
+      pngOk,
+      mode: app.renderer.mode,
     };
   });
 
   log(
-    `[${tag}] after paint+step: sand=${paintResult.sand} nonBgPixels=${paintResult.nonBg} fraction=${(paintResult.fraction * 100).toFixed(2)}%`,
+    `[${tag}] after paint+step: sand=${paintResult.sand} nonBgPixels=${paintResult.nonBg} fraction=${(paintResult.fraction * 100).toFixed(2)}% png=${paintResult.pngOk}`,
     lines
   );
-
-  if (paintResult.sand < 10) {
-    throw new Error("Paint did not place enough sand");
-  }
+  if (paintResult.sand < 10) throw new Error("Paint did not place enough sand");
   if (paintResult.fraction < 0.001) {
-    throw new Error("Canvas appears blank after paint+step (fraction " + paintResult.fraction + ")");
+    throw new Error("Sim render appears blank after paint+step (fraction " + paintResult.fraction + ")");
   }
+  if (!paintResult.pngOk) throw new Error("renderer.capturePNG failed");
 
-  // Select water and paint — surface should change
+  // Fire/lava showcase: ensure emissive materials don't crash the pipeline
+  const hotScene = await page.evaluate(() => {
+    const app = window.GrainfallApp;
+    const MAT = window.Materials.MAT;
+    app.sim.clear();
+    app.renderer.resetTemporal();
+    app.sim.paint(80, 200, MAT.LAVA, 10);
+    app.sim.paint(120, 180, MAT.FIRE, 6);
+    app.sim.paint(200, 100, MAT.WATER, 8);
+    for (let i = 0; i < 20; i++) app.sim.step();
+    const events = app.sim.drainVisualEvents();
+    app.renderer.renderFrame({});
+    // quality switch
+    app.setGfxQuality("performance");
+    app.renderer.renderFrame({});
+    app.setGfxQuality("ultra");
+    app.renderer.renderFrame({});
+    app.setGfxQuality("high");
+    return {
+      lava: app.sim.countMaterial(MAT.LAVA),
+      fire: app.sim.countMaterial(MAT.FIRE),
+      events: events.length,
+      quality: app.renderer.getQuality(),
+    };
+  });
+  log(
+    `[${tag}] hot scene lava=${hotScene.lava} fire=${hotScene.fire} drainedEvents=${hotScene.events} quality=${hotScene.quality}`,
+    lines
+  );
+  if (hotScene.lava + hotScene.fire < 1) throw new Error("Hot scene failed to place materials");
+
+  // Pointer mapping corners
+  const mapping = await page.evaluate(() => {
+    const app = window.GrainfallApp;
+    const el = app.overlay || app.canvas;
+    const rect = el.getBoundingClientRect();
+    const tl = app.clientToGrid(rect.left + 1, rect.top + 1);
+    const br = app.clientToGrid(rect.right - 1, rect.bottom - 1);
+    const mid = app.clientToGrid(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return { tl, br, mid, gridW: app.GRID_W, gridH: app.GRID_H };
+  });
+  log(
+    `[${tag}] map tl=${mapping.tl.x},${mapping.tl.y} mid=${mapping.mid.x},${mapping.mid.y} br=${mapping.br.x},${mapping.br.y}`,
+    lines
+  );
+  if (mapping.tl.x > 2 || mapping.tl.y > 2) throw new Error("Top-left mapping wrong");
+  if (mapping.br.x < mapping.gridW - 4 || mapping.br.y < mapping.gridH - 4) {
+    throw new Error("Bottom-right mapping wrong");
+  }
+  if (Math.abs(mapping.mid.x - (mapping.gridW / 2 | 0)) > 4) throw new Error("Mid X mapping wrong");
+
+  // Water paint via API
   const waterChange = await page.evaluate(() => {
     const app = window.GrainfallApp;
     const MAT = window.Materials.MAT;
@@ -143,30 +202,68 @@ async function runOnce(browser, baseUrl, lines, tag) {
     const after = app.sim.countMaterial(MAT.WATER);
     return { before, after, selected: app.selected };
   });
-  log(`[${tag}] water paint before=${waterChange.before} after=${waterChange.after} selected=${waterChange.selected}`, lines);
+  log(`[${tag}] water paint before=${waterChange.before} after=${waterChange.after}`, lines);
   if (waterChange.after <= waterChange.before) {
     throw new Error("Selecting water then painting did not change grid");
   }
 
-  // Palette UI exists and has buttons
   const paletteCount = await page.locator("#palette .mat-btn").count();
   log(`[${tag}] palette buttons: ${paletteCount}`, lines);
   if (paletteCount < 8) throw new Error("Palette too sparse");
 
-  // Click lava button
   await page.locator(".mat-btn", { hasText: "Lava" }).click();
   const selectedLava = await page.evaluate(() => window.GrainfallApp.selected === window.Materials.MAT.LAVA);
   if (!selectedLava) throw new Error("Lava button did not select lava");
   log(`[${tag}] lava palette selection OK`, lines);
 
+  // Resize smoke
+  await page.setViewportSize({ width: Math.max(390, viewport.width - 200), height: Math.max(700, viewport.height) });
+  await page.waitForTimeout(100);
+  const afterResize = await page.evaluate(() => {
+    const c = window.GrainfallApp.canvas;
+    const r = c.getBoundingClientRect();
+    return { cssW: r.width, cssH: r.height, bufW: c.width, bufH: c.height };
+  });
+  log(
+    `[${tag}] after resize css ${afterResize.cssW.toFixed(0)}x${afterResize.cssH.toFixed(0)} buf ${afterResize.bufW}x${afterResize.bufH}`,
+    lines
+  );
+  if (afterResize.cssW < 40) throw new Error("Canvas collapsed after resize");
+
   const shotPath = path.join(SCRATCH, `screenshot-${tag}.png`);
   await page.screenshot({ path: shotPath, fullPage: true });
   log(`[${tag}] screenshot: ${shotPath}`, lines);
 
+  // Showcase baselines (paused fixed scenes)
+  const showcasePath = path.join(SCRATCH, `showcase-${tag}.png`);
+  await page.evaluate(() => {
+    const app = window.GrainfallApp;
+    const MAT = window.Materials.MAT;
+    app.sim.clear();
+    app.renderer.resetTemporal();
+    // sand dune
+    for (let x = 40; x < 140; x++) {
+      for (let y = 220; y < 280; y++) {
+        if ((x + y) % 3 !== 0) app.sim.setCell(x, y, MAT.SAND);
+      }
+    }
+    // water pool
+    for (let x = 180; x < 260; x++) {
+      for (let y = 240; y < 300; y++) app.sim.setCell(x, y, MAT.WATER);
+    }
+    // fire + lava
+    app.sim.paint(320, 250, MAT.LAVA, 12);
+    app.sim.paint(360, 200, MAT.FIRE, 8);
+    app.sim.paint(400, 180, MAT.METAL, 4);
+    for (let i = 0; i < 15; i++) app.sim.step();
+    app.renderer.renderFrame({});
+  });
+  await page.locator("#sim-canvas").screenshot({ path: showcasePath });
+  log(`[${tag}] showcase: ${showcasePath}`, lines);
+
   if (pageErrors.length) {
     throw new Error("Page errors: " + pageErrors.join("; "));
   }
-  // Filter benign console noise
   const realConsole = consoleErrors.filter((e) => !/favicon/i.test(e));
   if (realConsole.length) {
     log(`[${tag}] console errors: ${realConsole.join(" | ")}`, lines);
@@ -174,13 +271,15 @@ async function runOnce(browser, baseUrl, lines, tag) {
   }
 
   await page.close();
-  return { paintResult, dims };
+  return { paintResult, boot };
 }
 
 async function main() {
   const lines = [];
   let server;
   try {
+    const { mkdir } = await import("fs/promises");
+    await mkdir(SCRATCH, { recursive: true });
     const srv = await startServer();
     server = srv.server;
     const baseUrl = `http://127.0.0.1:${srv.port}`;
@@ -188,8 +287,12 @@ async function main() {
 
     const browser = await chromium.launch({ headless: true });
     try {
-      await runOnce(browser, baseUrl, lines, "run1");
-      await runOnce(browser, baseUrl, lines, "run2");
+      const r1 = await runOnce(browser, baseUrl, lines, "desktop", { width: 1100, height: 800 });
+      await runOnce(browser, baseUrl, lines, "mobile", { width: 390, height: 844 });
+      if (r1.boot.mode !== "webgl2" && r1.boot.mode !== "canvas2d") {
+        throw new Error("Unknown renderer mode " + r1.boot.mode);
+      }
+      log(`Primary renderer mode: ${r1.boot.mode}`, lines);
       log("Browser verification PASSED", lines);
     } finally {
       await browser.close();
@@ -197,9 +300,7 @@ async function main() {
   } catch (e) {
     log("Browser verification FAILED: " + e.message, lines);
     log(String(e.stack || e), lines);
-    const out = path.join(SCRATCH, "launch-env.log");
-    await writeLog(out, lines);
-    // Also write console log
+    await writeLog(path.join(SCRATCH, "launch-env.log"), lines);
     await writeLog(path.join(SCRATCH, "browser-console.log"), lines);
     process.exitCode = 1;
     return;

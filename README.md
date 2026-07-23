@@ -72,10 +72,13 @@ npm run test:browser  # Playwright headless (needs `npx playwright install chrom
 
 | Path | Role |
 |------|------|
-| `js/materials.js` | Material IDs, colors, palette, type flags |
-| `js/sim.js` | Simulation core (no DOM) |
+| `js/materials.js` | Material IDs, colors, palette, type flags, GPU render metadata |
+| `js/sim.js` | Simulation core (no DOM); exposes render state + visual events |
+| `js/render/` | WebGL2 multi-pass renderer, effects, Canvas2D fallback |
 | `js/app.js` | UI, input, render loop |
 | `css/style.css` | Layout and chrome |
+
+Graphics use a WebGL2 pipeline (lighting, bloom, heat haze, particles) with an automatic Canvas2D fallback. Choose **Ultra / High / Performance** in the Brush panel.
 
 ## Contribute
 

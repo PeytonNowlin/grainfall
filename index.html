@@ -29,7 +29,11 @@
 
     <main class="app-main">
       <div class="stage" id="stage">
-        <canvas id="sim-canvas" width="480" height="320" aria-label="Falling sand simulation canvas"></canvas>
+        <div class="stage-stack" id="stage-stack">
+          <canvas id="sim-canvas" width="480" height="320" aria-label="Falling sand simulation canvas"></canvas>
+          <canvas id="sim-overlay" width="480" height="320" aria-hidden="true"></canvas>
+        </div>
+        <p id="gfx-status" class="gfx-status" hidden></p>
       </div>
 
       <aside class="sidebar">
@@ -55,13 +59,24 @@
             <input type="range" id="speed" min="0" max="4" value="2" />
             <span id="speed-label">1×</span>
           </div>
+          <div class="control-row">
+            <label for="gfx-quality">Graphics</label>
+            <select id="gfx-quality" aria-label="Graphics quality">
+              <option value="ultra">Ultra</option>
+              <option value="high" selected>High</option>
+              <option value="performance">Performance</option>
+            </select>
+          </div>
           <div class="control-row control-row-check">
             <label for="brush-overlap" title="When off, brush tools only paint empty cells and leave existing particles alone">Overlap</label>
             <input type="checkbox" id="brush-overlap" checked />
             <span id="overlap-label" class="toggle-label">On</span>
           </div>
           <div class="brush-meta">
-            <p id="hint">Click &amp; drag to paint · Space pause · C clear</p>
+            <details class="hint-details">
+              <summary>Controls</summary>
+              <p id="hint">Click &amp; drag to paint · Space pause · C clear</p>
+            </details>
             <p id="stats" class="stats-pill" aria-live="off">— fps</p>
           </div>
         </section>
@@ -75,6 +90,10 @@
     <!-- Plain script tags: works from file:// and any static server -->
     <script src="js/materials.js"></script>
     <script src="js/sim.js"></script>
+    <script src="js/render/gl.js"></script>
+    <script src="js/render/shaders.js"></script>
+    <script src="js/render/effects.js"></script>
+    <script src="js/render/renderer.js"></script>
     <script src="js/app.js"></script>
   </body>
 </html>

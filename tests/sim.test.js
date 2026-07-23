@@ -1032,6 +1032,76 @@ console.log("\n[loadGrid]");
   assert(s2.loadGrid(new Uint8Array(4)) === false, "loadGrid rejects wrong-sized buffer");
 })();
 
+// --- Visual events / render state (graphics overhaul contract) ---
+console.log("\n[visual events]");
+(function () {
+  assert(typeof Materials.buildRenderTextures === "function", "materials expose buildRenderTextures");
+  var tables = Materials.buildRenderTextures();
+  assert(tables.palette.length === 256 * 4, "palette texture size");
+  assert(tables.props.length === 256 * 4, "props texture size");
+  assert(tables.extras.length === 256 * 4, "extras texture size");
+  assertGt(Materials.EMISSIVE[MAT.FIRE], 0, "fire has emissive metadata");
+  assertGt(Materials.HEIGHT[MAT.WALL], Materials.HEIGHT[MAT.SAND], "wall taller than sand");
+
+  function armBlast(s) {
+    s.clear();
+    for (var x = 8; x <= 18; x++) s.setCell(x, 21, MAT.WALL);
+    for (var gp = 10; gp < 16; gp++) s.setCell(gp, 20, MAT.GUNPOWDER);
+    s.setCell(16, 20, MAT.FIRE);
+  }
+
+  var a = Sim.createSim(32, 24, { seed: 99 });
+  var b = Sim.createSim(32, 24, { seed: 99 });
+  armBlast(a);
+  armBlast(b);
+  for (var i = 0; i < 30; i++) {
+    a.step();
+    b.step();
+  }
+  var snapA = a.snapshot().join(",");
+  var snapB = b.snapshot().join(",");
+  assertEqual(snapA, snapB, "visual event recording does not alter seeded snapshots");
+
+  var evA = a.drainVisualEvents();
+  var evB = b.drainVisualEvents();
+  assertGt(evA.length, 0, "explosion emits visual events");
+  assertEqual(evA.length, evB.length, "seeded runs emit the same number of visual events");
+  assertEqual(evA[0].type, evB[0].type, "seeded visual event types match");
+  var hasExplosion = evA.some(function (e) {
+    return e.type === "explosion";
+  });
+  assert(hasExplosion, "gunpowder detonation records explosion events");
+  assertEqual(a.drainVisualEvents().length, 0, "drainVisualEvents clears the queue");
+
+  var rs = a.getRenderState();
+  assert(rs.grid === a.grid, "getRenderState shares grid buffer");
+  assert(rs.life && rs.life.length === a.grid.length, "getRenderState exposes life");
+  assert(rs.noise && rs.noise.length === a.grid.length, "getRenderState exposes noise");
+  assert(typeof rs.frame === "number", "getRenderState exposes frame");
+
+  // clear() drops pending events
+  armBlast(a);
+  for (var k = 0; k < 30; k++) a.step();
+  assertGt(a.drainVisualEvents().length, 0, "events queued before clear");
+  armBlast(a);
+  for (var k2 = 0; k2 < 30; k2++) a.step();
+  a.clear();
+  assertEqual(a.drainVisualEvents().length, 0, "clear() drops pending visual events");
+
+  // loadGrid() drops pending events
+  var c = Sim.createSim(32, 24, { seed: 3 });
+  armBlast(c);
+  for (var t = 0; t < 5; t++) c.step();
+  var buf = Uint8Array.from(c.snapshot());
+  armBlast(c);
+  for (var t2 = 0; t2 < 30; t2++) c.step();
+  assertGt(c.drainVisualEvents().length, 0, "events exist before loadGrid");
+  armBlast(c);
+  for (var t3 = 0; t3 < 30; t3++) c.step();
+  c.loadGrid(buf);
+  assertEqual(c.drainVisualEvents().length, 0, "loadGrid() drops pending visual events");
+})();
+
 // --- Summary ---
 console.log("\n=======================");
 console.log("Passed: " + passed + "  Failed: " + failed);

@@ -14,10 +14,9 @@
 
   var MAT = M.MAT;
 
-  // Logical grid size (pixels). Canvas is scaled via CSS for crisp look.
+  // Logical grid size (pixels). Display is scaled via CSS / renderer DPR.
   var GRID_W = 480;
   var GRID_H = 320;
-  var SCALE = 2; // CSS pixel scale factor applied via canvas size
 
   var sim = Sim.createSim(GRID_W, GRID_H);
   var selected = MAT.SAND;
@@ -30,6 +29,7 @@
   var stepAccum = 0;
   // When true (default), brush overwrites any cell. When false, only empty cells.
   var allowOverlap = true;
+  var gfxQuality = "high";
 
   // Restore last-used tool settings (best-effort; localStorage may be blocked on file://).
   var PREFS_KEY = "grainfall.prefs";
@@ -40,9 +40,15 @@
     if (SPEEDS.indexOf(savedPrefs.speed) >= 0) speed = savedPrefs.speed;
     if (typeof savedPrefs.tool === "string") tool = savedPrefs.tool;
     if (typeof savedPrefs.allowOverlap === "boolean") allowOverlap = savedPrefs.allowOverlap;
+    if (savedPrefs.gfxQuality === "ultra" || savedPrefs.gfxQuality === "high" || savedPrefs.gfxQuality === "performance") {
+      gfxQuality = savedPrefs.gfxQuality;
+    }
   } catch (e) {}
 
   var canvas = document.getElementById("sim-canvas");
+  var overlay = document.getElementById("sim-overlay");
+  var stageStack = document.getElementById("stage-stack");
+  var stageEl = document.getElementById("stage");
   var paletteEl = document.getElementById("palette");
   var brushEl = document.getElementById("brush-size");
   var brushLabel = document.getElementById("brush-label");
@@ -51,6 +57,8 @@
   var speedLabel = document.getElementById("speed-label");
   var overlapEl = document.getElementById("brush-overlap");
   var overlapLabel = document.getElementById("overlap-label");
+  var gfxEl = document.getElementById("gfx-quality");
+  var gfxStatusEl = document.getElementById("gfx-status");
   var clearBtn = document.getElementById("btn-clear");
   var pauseBtn = document.getElementById("btn-pause");
   var saveBtn = document.getElementById("btn-save");
@@ -62,13 +70,62 @@
     return;
   }
 
-  canvas.width = GRID_W;
-  canvas.height = GRID_H;
-  // Display size: fill available area while keeping aspect
+  // Overlay is the pointer target; sim canvas is WebGL/2D display only.
+  var inputEl = overlay || canvas;
+  if (overlay) {
+    overlay.width = GRID_W;
+    overlay.height = GRID_H;
+  }
+
+  var reducedMotion = false;
+  try {
+    reducedMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch (eRM) {}
+
+  var RendererAPI = window.GrainfallRenderer;
+  if (!RendererAPI) {
+    console.error("Grainfall: renderer.js must load before app.js");
+    return;
+  }
+  var renderer = RendererAPI.createRenderer({
+    canvas: canvas,
+    sim: sim,
+    materials: M,
+    quality: gfxQuality,
+    reducedMotion: reducedMotion,
+  });
+  // Fallback may replace the canvas node if WebGL tainted it.
+  if (renderer.canvas && renderer.canvas !== canvas) {
+    canvas = renderer.canvas;
+  }
+  if (gfxStatusEl) {
+    if (renderer.mode === "canvas2d") {
+      gfxStatusEl.hidden = false;
+      gfxStatusEl.textContent = "Software renderer (WebGL2 unavailable)";
+    } else {
+      gfxStatusEl.hidden = true;
+      gfxStatusEl.textContent = "";
+    }
+  }
+
+  // Overlay 2D context for brush/shape/pause chrome (independent of postFX).
+  var ctx = null;
+  if (overlay) {
+    ctx = overlay.getContext("2d", { alpha: true });
+    if (ctx) ctx.imageSmoothingEnabled = false;
+  } else {
+    // Extreme fallback: draw overlays on the same canvas (Canvas2D mode only).
+    ctx = canvas.getContext("2d", { alpha: false });
+    if (ctx) ctx.imageSmoothingEnabled = false;
+  }
+
   function sizeCanvas() {
-    var wrap = canvas.parentElement;
+    var wrap = stageEl || (stageStack && stageStack.parentElement) || canvas.parentElement;
     var maxW = wrap ? wrap.clientWidth : window.innerWidth;
     var maxH = wrap ? wrap.clientHeight : window.innerHeight - 120;
+    // Leave a little padding inside the stage
+    maxW = Math.max(64, maxW - 8);
+    maxH = Math.max(64, maxH - 8);
     var aspect = GRID_W / GRID_H;
     var w = maxW;
     var h = w / aspect;
@@ -76,16 +133,37 @@
       h = maxH;
       w = h * aspect;
     }
-    canvas.style.width = Math.floor(w) + "px";
-    canvas.style.height = Math.floor(h) + "px";
+    var dpr = window.devicePixelRatio || 1;
+    renderer.resize(w, h, dpr);
+    if (overlay) {
+      overlay.style.width = Math.floor(w) + "px";
+      overlay.style.height = Math.floor(h) + "px";
+    }
+    if (stageStack) {
+      stageStack.style.width = Math.floor(w) + "px";
+      stageStack.style.height = Math.floor(h) + "px";
+    }
   }
   sizeCanvas();
   window.addEventListener("resize", sizeCanvas);
-
-  var ctx = canvas.getContext("2d", { alpha: false });
-  ctx.imageSmoothingEnabled = false;
-  var imageData = ctx.createImageData(GRID_W, GRID_H);
-  var rgba = imageData.data;
+  if (typeof ResizeObserver !== "undefined" && stageEl) {
+    try {
+      new ResizeObserver(function () {
+        sizeCanvas();
+      }).observe(stageEl);
+    } catch (eRO) {}
+  }
+  if (window.matchMedia) {
+    try {
+      var mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      var onMotion = function () {
+        reducedMotion = !!mq.matches;
+        renderer.setReducedMotion(reducedMotion);
+      };
+      if (mq.addEventListener) mq.addEventListener("change", onMotion);
+      else if (mq.addListener) mq.addListener(onMotion);
+    } catch (eMQ) {}
+  }
 
   var selectionSwatch = document.getElementById("selection-swatch");
   var selectionName = document.getElementById("selection-name");
@@ -182,7 +260,9 @@
     tool = id;
     if (toolEl) {
       Array.prototype.forEach.call(toolEl.querySelectorAll(".tool-btn"), function (b) {
-        b.classList.toggle("active", b.dataset.tool === tool);
+        var on = b.dataset.tool === tool;
+        b.classList.toggle("active", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
       });
     }
   }
@@ -196,6 +276,8 @@
       btn.className = "tool-btn" + (t.id === tool ? " active" : "");
       btn.dataset.tool = t.id;
       btn.title = t.name + " (" + TOOL_KEY_LABEL[t.id] + ")";
+      btn.setAttribute("aria-label", t.name);
+      btn.setAttribute("aria-pressed", t.id === tool ? "true" : "false");
       var nameSpan = document.createElement("span");
       nameSpan.className = "tool-name";
       nameSpan.textContent = t.name;
@@ -242,6 +324,16 @@
   if (clearBtn) {
     clearBtn.addEventListener("click", function () {
       sim.clear();
+      renderer.resetTemporal();
+    });
+  }
+
+  if (gfxEl) {
+    gfxEl.value = gfxQuality;
+    gfxEl.addEventListener("change", function () {
+      gfxQuality = gfxEl.value;
+      renderer.setQuality(gfxQuality);
+      sizeCanvas();
     });
   }
 
@@ -268,7 +360,7 @@
 
   // --- Pointer mapping ---
   function clientToGrid(clientX, clientY) {
-    var rect = canvas.getBoundingClientRect();
+    var rect = inputEl.getBoundingClientRect();
     var x = ((clientX - rect.left) / rect.width) * GRID_W;
     var y = ((clientY - rect.top) / rect.height) * GRID_H;
     return {
@@ -336,8 +428,8 @@
     lastPaint = p;
   }
 
-  canvas.addEventListener("pointerdown", function (e) {
-    canvas.setPointerCapture(e.pointerId);
+  inputEl.addEventListener("pointerdown", function (e) {
+    inputEl.setPointerCapture(e.pointerId);
     e.preventDefault();
     erasing = e.button === 2; // right button erases
     var p = clientToGrid(e.clientX, e.clientY);
@@ -367,7 +459,7 @@
       shape = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, kind: kind };
     }
   });
-  canvas.addEventListener("pointermove", function (e) {
+  inputEl.addEventListener("pointermove", function (e) {
     cursor = clientToGrid(e.clientX, e.clientY);
     if (painting) {
       paintAt(e.clientX, e.clientY);
@@ -378,7 +470,7 @@
       e.preventDefault();
     }
   });
-  canvas.addEventListener("pointerleave", function () {
+  inputEl.addEventListener("pointerleave", function () {
     cursor = null;
   });
   function endStroke() {
@@ -390,17 +482,17 @@
     }
     erasing = false;
   }
-  canvas.addEventListener("pointerup", endStroke);
-  canvas.addEventListener("pointercancel", endStroke);
-  canvas.addEventListener("contextmenu", function (e) {
+  inputEl.addEventListener("pointerup", endStroke);
+  inputEl.addEventListener("pointercancel", endStroke);
+  inputEl.addEventListener("contextmenu", function (e) {
     e.preventDefault();
   });
 
   // Touch-friendly: prevent page scroll while drawing
-  canvas.style.touchAction = "none";
+  inputEl.style.touchAction = "none";
 
   // Scroll wheel adjusts brush size over canvas
-  canvas.addEventListener(
+  inputEl.addEventListener(
     "wheel",
     function (e) {
       e.preventDefault();
@@ -423,6 +515,7 @@
           speed: speed,
           tool: tool,
           allowOverlap: allowOverlap,
+          gfxQuality: gfxQuality,
         })
       );
     } catch (e) {}
@@ -430,13 +523,14 @@
 
   // Keyboard shortcuts 1-9
   window.addEventListener("keydown", function (e) {
-    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT")) return;
     if (e.key === " ") {
       setPaused(!paused);
       e.preventDefault();
     }
     if (e.key === "c" || e.key === "C") {
       sim.clear();
+      renderer.resetTemporal();
     }
     if (e.key === "s" || e.key === "S") {
       savePNG();
@@ -475,20 +569,27 @@
     }
   });
 
+  function clearOverlay() {
+    if (!ctx || !overlay) return;
+    ctx.clearRect(0, 0, GRID_W, GRID_H);
+  }
+
   // Outline preview of the shape being dragged, drawn over the blitted grid.
   function drawPreview() {
-    if (!shape) return;
+    if (!shape || !ctx) return;
     var c = M.colorFor(selected === MAT.EMPTY ? MAT.WALL : selected);
     var rgb = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
     ctx.save();
     ctx.lineWidth = Math.max(1, brushSize);
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
-    // Soft glow under the crisp stroke
+    // Soft glow under the crisp stroke (skipped under reduced motion)
     ctx.globalAlpha = 0.35;
     ctx.strokeStyle = rgb;
-    ctx.shadowColor = rgb;
-    ctx.shadowBlur = 6;
+    if (!reducedMotion) {
+      ctx.shadowColor = rgb;
+      ctx.shadowBlur = 6;
+    }
     ctx.beginPath();
     if (shape.kind === "line") {
       ctx.moveTo(shape.x0 + 0.5, shape.y0 + 0.5);
@@ -513,7 +614,7 @@
 
   // Ring showing brush position/size while hovering (not during a shape drag).
   function drawCursor() {
-    if (!cursor || shape) return;
+    if (!cursor || shape || !ctx) return;
     var c = M.colorFor(currentMat() === MAT.EMPTY ? MAT.WALL : currentMat());
     var rgb = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
     var rad = brushSize + 0.5;
@@ -618,7 +719,10 @@
       var dims = rest.slice(0, colon).split("x");
       if ((parseInt(dims[0], 10) | 0) !== GRID_W || (parseInt(dims[1], 10) | 0) !== GRID_H) return false;
       var grid = decodeGrid(b64urlToBytes(rest.slice(colon + 1)), GRID_W * GRID_H);
-      return grid ? sim.loadGrid(grid) : false;
+      if (!grid) return false;
+      var ok = sim.loadGrid(grid);
+      if (ok) renderer.resetTemporal();
+      return ok;
     } catch (e) {
       return false;
     }
@@ -627,20 +731,18 @@
   if (shareBtn) shareBtn.addEventListener("click", shareLink);
   loadFromHash();
 
-  // Download the current grid as a PNG. Re-blits first so overlays (cursor
-  // ring, shape preview) are excluded from the saved image.
+  // Download the current grid as a PNG (no cursor/tool overlays).
   function savePNG() {
-    sim.renderTo(rgba);
-    ctx.putImageData(imageData, 0, 0);
+    var href = renderer.capturePNG();
     var a = document.createElement("a");
     a.download = "grainfall-" + Date.now() + ".png";
-    a.href = canvas.toDataURL("image/png");
+    a.href = href;
     a.click();
   }
 
   // Dim the canvas and label it while paused, so a frozen sim reads as intentional.
   function drawPausedOverlay() {
-    if (!paused) return;
+    if (!paused || !ctx) return;
     ctx.save();
     // Vignette-ish dim
     ctx.fillStyle = "rgba(8, 10, 16, 0.45)";
@@ -694,17 +796,26 @@
         n++;
       }
     }
-    sim.renderTo(rgba);
-    ctx.putImageData(imageData, 0, 0);
+    renderer.renderFrame({ paused: paused });
+    clearOverlay();
     drawPreview();
     drawCursor();
     drawPausedOverlay();
+    if (stageStack && renderer.getShakeCSS && !reducedMotion) {
+      var sh = renderer.getShakeCSS();
+      if (sh.x || sh.y) {
+        stageStack.style.transform =
+          "translate(" + sh.x.toFixed(2) + "px," + sh.y.toFixed(2) + "px)";
+      } else {
+        stageStack.style.transform = "";
+      }
+    }
     if (statsEl && now) {
       fpsFrames++;
       if (!fpsSince) fpsSince = now;
       if (now - fpsSince >= 500) {
         var fps = Math.round((fpsFrames * 1000) / (now - fpsSince));
-        statsEl.textContent = fps + " fps";
+        statsEl.textContent = fps + " fps · " + renderer.mode;
         statsEl.classList.toggle("stats-good", fps >= 50);
         statsEl.classList.toggle("stats-ok", fps >= 30 && fps < 50);
         statsEl.classList.toggle("stats-low", fps < 30);
@@ -719,6 +830,7 @@
   // Expose for browser verification / debugging
   window.GrainfallApp = {
     sim: sim,
+    renderer: renderer,
     get selected() {
       return selected;
     },
@@ -743,9 +855,19 @@
     get speed() {
       return speed;
     },
+    get gfxQuality() {
+      return gfxQuality;
+    },
+    setGfxQuality: function (id) {
+      gfxQuality = id;
+      renderer.setQuality(id);
+      if (gfxEl) gfxEl.value = id;
+      sizeCanvas();
+    },
     GRID_W: GRID_W,
     GRID_H: GRID_H,
     canvas: canvas,
+    overlay: overlay,
   };
 
   if (hintEl) {

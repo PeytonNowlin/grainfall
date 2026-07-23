@@ -173,6 +173,27 @@
     var hasCharge = false;
     var chargeAge = 0; // consecutive frames with live charge; used to kill loops
 
+    // Visual event ring: append-only facts for the renderer. Never affects RNG/grid.
+    // Each event: { type, x, y, r?, mat? }. Bounded to avoid unbounded growth.
+    var VISUAL_EVENT_CAP = 256;
+    var visualEvents = [];
+
+    function pushVisualEvent(ev) {
+      if (visualEvents.length >= VISUAL_EVENT_CAP) return;
+      visualEvents.push(ev);
+    }
+
+    function drainVisualEvents() {
+      if (!visualEvents.length) return [];
+      var out = visualEvents;
+      visualEvents = [];
+      return out;
+    }
+
+    function clearVisualEvents() {
+      visualEvents.length = 0;
+    }
+
     function rand() {
       // xorshift32
       rngState ^= rngState << 13;
@@ -228,6 +249,7 @@
       windY.fill(0);
       hasCharge = false;
       chargeAge = 0;
+      clearVisualEvents();
     }
 
     /** Diffuse (5-point blur) + decay the wind field. */
@@ -414,6 +436,8 @@
      * Solid debris is ejected past the blast radius so grit sprays out of the crater.
      */
     function explode(cx, cy, r) {
+      // Record for FX after we have the blast parameters (no RNG / no sim branch).
+      pushVisualEvent({ type: "explosion", x: cx, y: cy, r: r });
       var r2 = r * r;
       var core = r2 >> 1;
       // Deferred ejecta: [fromX, fromY, mat] — placed after the fireball so paths are clear
@@ -563,11 +587,13 @@
         if (m === MAT.FIRE) {
           become(i, MAT.STEAM, 60 + ((rand() * 40) | 0));
           become(idx(nx, ny), MAT.EMPTY, 0);
+          pushVisualEvent({ type: "steam_puff", x: x, y: y });
           return true;
         }
         if (m === MAT.LAVA) {
           become(i, MAT.STEAM, 70 + ((rand() * 40) | 0));
           become(idx(nx, ny), MAT.STONE, 0);
+          pushVisualEvent({ type: "steam_puff", x: x, y: y });
           return true;
         }
       }
@@ -595,6 +621,7 @@
       // Occasional spark above for a molten look
       if (cellAt(x, y - 1) === MAT.EMPTY && rand() < 0.008) {
         become(idx(x, y - 1), MAT.FIRE, 8 + ((rand() * 8) | 0));
+        pushVisualEvent({ type: "spark", x: x, y: y - 1 });
       }
       return false;
     }
@@ -885,6 +912,7 @@
     }
 
     function dischargeLightning(x, y) {
+      pushVisualEvent({ type: "lightning", x: x, y: y, r: 2 });
       var R = 2;
       for (var dy = -R; dy <= R; dy++) {
         for (var dx = -R; dx <= R; dx++) {
@@ -931,6 +959,7 @@
           var m = grid[j];
           if (m === MAT.ANT || m === MAT.BIRD || m === MAT.FIGHTER) {
             become(j, MAT.FIRE, 8 + ((rand() * 6) | 0)); // electrocuted
+            pushVisualEvent({ type: "zap", x: nx, y: ny });
           } else if (IGNITE[m]) {
             tryIgnite(nx, ny); // sparks ignite fuel / set off bombs
           }
@@ -1778,11 +1807,37 @@
       windY.fill(0);
       hasCharge = false;
       chargeAge = 0;
+      clearVisualEvents();
       for (var i = 0; i < grid.length; i++) {
         if (grid[i] === MAT.FIRE) life[i] = 30 + ((rand() * 30) | 0);
         else if (grid[i] === MAT.STEAM) life[i] = 90 + ((rand() * 60) | 0);
       }
       return true;
+    }
+
+    /**
+     * Read-only view of buffers the renderer needs. Do not mutate.
+     * Returned object is reused each call — copy fields if retaining across frames.
+     */
+    var renderStateView = {
+      width: w,
+      height: h,
+      grid: grid,
+      life: life,
+      noise: noise,
+      windX: windX,
+      windY: windY,
+      windW: wW,
+      windH: wH,
+      frame: 0,
+    };
+
+    function getRenderState() {
+      renderStateView.frame = frame;
+      // Wind buffers may swap each stepWind(); keep getters current.
+      renderStateView.windX = windX;
+      renderStateView.windY = windY;
+      return renderStateView;
     }
 
     return {
@@ -1804,6 +1859,8 @@
       renderTo: renderTo,
       countMaterial: countMaterial,
       snapshot: snapshot,
+      getRenderState: getRenderState,
+      drainVisualEvents: drainVisualEvents,
       get frame() {
         return frame;
       },

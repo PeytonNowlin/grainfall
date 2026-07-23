@@ -188,6 +188,182 @@
     return !!GAS[m];
   }
 
+  // --- GPU render metadata (0–255, indexed by material id) ---
+  // Height / occupancy for fake normals & AO (EMPTY=0, gas low, solid high).
+  var HEIGHT = new Uint8Array(32);
+  HEIGHT[MAT.EMPTY] = 0;
+  HEIGHT[MAT.FIRE] = 28;
+  HEIGHT[MAT.STEAM] = 22;
+  HEIGHT[MAT.GAS] = 24;
+  HEIGHT[MAT.LIGHTNING] = 40;
+  HEIGHT[MAT.WATER] = 90;
+  HEIGHT[MAT.OIL] = 88;
+  HEIGHT[MAT.ACID] = 92;
+  HEIGHT[MAT.NAPALM] = 95;
+  HEIGHT[MAT.LAVA] = 110;
+  HEIGHT[MAT.MERCURY] = 120;
+  HEIGHT[MAT.NITRO] = 100;
+  HEIGHT[MAT.SNOW] = 130;
+  HEIGHT[MAT.SAND] = 150;
+  HEIGHT[MAT.GUNPOWDER] = 145;
+  HEIGHT[MAT.SEED] = 140;
+  HEIGHT[MAT.VIRUS] = 142;
+  HEIGHT[MAT.PLANT] = 175;
+  HEIGHT[MAT.ICE] = 185;
+  HEIGHT[MAT.GLASS] = 180;
+  HEIGHT[MAT.WOOD] = 190;
+  HEIGHT[MAT.STONE] = 200;
+  HEIGHT[MAT.WALL] = 220;
+  HEIGHT[MAT.METAL] = 210;
+  HEIGHT[MAT.CLONE] = 195;
+  HEIGHT[MAT.TORCH] = 200;
+  HEIGHT[MAT.FAN] = 195;
+  HEIGHT[MAT.ANT] = 160;
+  HEIGHT[MAT.BIRD] = 155;
+  HEIGHT[MAT.FIGHTER] = 165;
+
+  // Roughness (255 = matte, 0 = mirror).
+  var ROUGHNESS = new Uint8Array(32);
+  for (var ri = 0; ri < 32; ri++) ROUGHNESS[ri] = 180;
+  ROUGHNESS[MAT.EMPTY] = 255;
+  ROUGHNESS[MAT.WATER] = 40;
+  ROUGHNESS[MAT.ICE] = 50;
+  ROUGHNESS[MAT.GLASS] = 30;
+  ROUGHNESS[MAT.MERCURY] = 20;
+  ROUGHNESS[MAT.METAL] = 45;
+  ROUGHNESS[MAT.OIL] = 70;
+  ROUGHNESS[MAT.LAVA] = 90;
+  ROUGHNESS[MAT.SAND] = 200;
+  ROUGHNESS[MAT.STONE] = 190;
+  ROUGHNESS[MAT.WALL] = 170;
+  ROUGHNESS[MAT.WOOD] = 210;
+  ROUGHNESS[MAT.SNOW] = 220;
+  ROUGHNESS[MAT.FIRE] = 255;
+  ROUGHNESS[MAT.STEAM] = 255;
+  ROUGHNESS[MAT.GAS] = 255;
+  ROUGHNESS[MAT.LIGHTNING] = 255;
+
+  // Specular strength.
+  var SPECULAR = new Uint8Array(32);
+  SPECULAR[MAT.WATER] = 200;
+  SPECULAR[MAT.ICE] = 180;
+  SPECULAR[MAT.GLASS] = 220;
+  SPECULAR[MAT.MERCURY] = 240;
+  SPECULAR[MAT.METAL] = 210;
+  SPECULAR[MAT.OIL] = 140;
+  SPECULAR[MAT.LAVA] = 100;
+  SPECULAR[MAT.ACID] = 120;
+  SPECULAR[MAT.SNOW] = 60;
+  SPECULAR[MAT.SAND] = 30;
+
+  // Opacity (255 = opaque). Used for steam/gas/glass soft edges.
+  var OPACITY = new Uint8Array(32);
+  for (var oi = 0; oi < 32; oi++) OPACITY[oi] = 255;
+  OPACITY[MAT.EMPTY] = 0;
+  OPACITY[MAT.STEAM] = 90;
+  OPACITY[MAT.GAS] = 110;
+  OPACITY[MAT.FIRE] = 200;
+  OPACITY[MAT.GLASS] = 160;
+  OPACITY[MAT.WATER] = 210;
+  OPACITY[MAT.LIGHTNING] = 230;
+
+  // Base emissive intensity (boosted further by life/charge in shaders).
+  var EMISSIVE = new Uint8Array(32);
+  EMISSIVE[MAT.FIRE] = 230;
+  EMISSIVE[MAT.LAVA] = 200;
+  EMISSIVE[MAT.NAPALM] = 180;
+  EMISSIVE[MAT.TORCH] = 210;
+  EMISSIVE[MAT.LIGHTNING] = 255;
+  EMISSIVE[MAT.NITRO] = 80;
+  EMISSIVE[MAT.ACID] = 50;
+  EMISSIVE[MAT.VIRUS] = 40;
+  EMISSIVE[MAT.CLONE] = 30;
+  EMISSIVE[MAT.GAS] = 20;
+
+  // Thermal output for renderer-only heat persistence / haze.
+  var THERMAL = new Uint8Array(32);
+  THERMAL[MAT.FIRE] = 255;
+  THERMAL[MAT.LAVA] = 240;
+  THERMAL[MAT.NAPALM] = 220;
+  THERMAL[MAT.TORCH] = 200;
+  THERMAL[MAT.LIGHTNING] = 255;
+  THERMAL[MAT.NITRO] = 60;
+  THERMAL[MAT.STEAM] = 40;
+  THERMAL[MAT.METAL] = 10;
+
+  // Bit flags packed into RENDER_FLAGS[m]:
+  // 1 solid, 2 liquid, 4 powder, 8 gas, 16 translucent, 32 emissive, 64 creature, 128 conductor-like
+  var RF_SOLID = 1;
+  var RF_LIQUID = 2;
+  var RF_POWDER = 4;
+  var RF_GAS = 8;
+  var RF_TRANSLUCENT = 16;
+  var RF_EMISSIVE = 32;
+  var RF_CREATURE = 64;
+  var RF_CONDUCTOR = 128;
+  var RENDER_FLAGS = new Uint8Array(32);
+  function setFlag(m, f) {
+    RENDER_FLAGS[m] = (RENDER_FLAGS[m] | f) & 0xff;
+  }
+  Object.keys(SOLID).forEach(function (k) {
+    setFlag(+k, RF_SOLID);
+  });
+  Object.keys(LIQUID).forEach(function (k) {
+    setFlag(+k, RF_LIQUID);
+  });
+  Object.keys(POWDER).forEach(function (k) {
+    setFlag(+k, RF_POWDER);
+  });
+  Object.keys(GAS).forEach(function (k) {
+    setFlag(+k, RF_GAS);
+  });
+  setFlag(MAT.GLASS, RF_TRANSLUCENT);
+  setFlag(MAT.STEAM, RF_TRANSLUCENT);
+  setFlag(MAT.GAS, RF_TRANSLUCENT);
+  setFlag(MAT.WATER, RF_TRANSLUCENT);
+  setFlag(MAT.FIRE, RF_EMISSIVE | RF_TRANSLUCENT);
+  setFlag(MAT.LAVA, RF_EMISSIVE);
+  setFlag(MAT.NAPALM, RF_EMISSIVE);
+  setFlag(MAT.TORCH, RF_EMISSIVE);
+  setFlag(MAT.LIGHTNING, RF_EMISSIVE);
+  setFlag(MAT.NITRO, RF_EMISSIVE);
+  setFlag(MAT.ACID, RF_EMISSIVE);
+  setFlag(MAT.ANT, RF_CREATURE);
+  setFlag(MAT.BIRD, RF_CREATURE);
+  setFlag(MAT.FIGHTER, RF_CREATURE);
+  setFlag(MAT.METAL, RF_CONDUCTOR);
+  setFlag(MAT.WATER, RF_CONDUCTOR);
+  setFlag(MAT.MERCURY, RF_CONDUCTOR);
+
+  /**
+   * Build 256×1 RGBA8 lookup textures for the GPU renderer.
+   * palette: RGB from COLORS, A = emissive
+   * props: R=height G=roughness B=specular A=flags
+   * extras: R=opacity G=thermal B=unused A=unused
+   */
+  function buildRenderTextures() {
+    var palette = new Uint8Array(256 * 4);
+    var props = new Uint8Array(256 * 4);
+    var extras = new Uint8Array(256 * 4);
+    for (var m = 0; m < 32; m++) {
+      var o = m * 4;
+      var ci = m * 4;
+      palette[o] = COLORS[ci];
+      palette[o + 1] = COLORS[ci + 1];
+      palette[o + 2] = COLORS[ci + 2];
+      palette[o + 3] = EMISSIVE[m];
+      props[o] = HEIGHT[m];
+      props[o + 1] = ROUGHNESS[m];
+      props[o + 2] = SPECULAR[m];
+      props[o + 3] = RENDER_FLAGS[m];
+      extras[o] = OPACITY[m];
+      extras[o + 1] = THERMAL[m];
+      extras[o + 2] = 0;
+      extras[o + 3] = 255;
+    }
+    return { palette: palette, props: props, extras: extras };
+  }
+
   var Materials = {
     MAT: MAT,
     COLORS: COLORS,
@@ -197,6 +373,22 @@
     LIQUID: LIQUID,
     POWDER: POWDER,
     GAS: GAS,
+    HEIGHT: HEIGHT,
+    ROUGHNESS: ROUGHNESS,
+    SPECULAR: SPECULAR,
+    OPACITY: OPACITY,
+    EMISSIVE: EMISSIVE,
+    THERMAL: THERMAL,
+    RENDER_FLAGS: RENDER_FLAGS,
+    RF_SOLID: RF_SOLID,
+    RF_LIQUID: RF_LIQUID,
+    RF_POWDER: RF_POWDER,
+    RF_GAS: RF_GAS,
+    RF_TRANSLUCENT: RF_TRANSLUCENT,
+    RF_EMISSIVE: RF_EMISSIVE,
+    RF_CREATURE: RF_CREATURE,
+    RF_CONDUCTOR: RF_CONDUCTOR,
+    buildRenderTextures: buildRenderTextures,
     colorFor: colorFor,
     isEmpty: isEmpty,
     isSolid: isSolid,

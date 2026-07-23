@@ -31,6 +31,7 @@ Desktop.ini
 /blob-report/
 /playwright/.cache/
 .playwright/
+.scratch-browser/
 
 # Local deploy / hosting
 .vercel/
