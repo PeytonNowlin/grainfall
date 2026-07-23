@@ -166,6 +166,47 @@
     var windY = new Float32Array(wW * wH);
     var windX2 = new Float32Array(wW * wH);
     var windY2 = new Float32Array(wW * wH);
+    var windTtl = 0; // frames to keep scanning wind into dormant chunks (0 = none)
+
+    // --- Dirty-region stepping ------------------------------------------------
+    // Skip chunks where nothing can happen. `active` is processed this frame;
+    // every cell change wakes its chunk + 8 neighbors into `dirty` for next
+    // frame, so motion crossing a border and neighbor reactions are never missed.
+    // ponytail: fixed 32px chunks. Shrink CHUNK for finer skipping on sparse
+    // scenes, at the cost of more per-frame bookkeeping.
+    var CHUNK = 32;
+    var cW = Math.ceil(w / CHUNK);
+    var cH = Math.ceil(h / CHUNK);
+    var active = new Uint8Array(cW * cH); // chunks to process this frame
+    var dirty = new Uint8Array(cW * cH); // accumulates next frame's work
+    dirty.fill(1); // first step settles the whole grid from scratch
+
+    // Materials that can act without a neighbor moving first (fire spreads, ice
+    // freezes water, clone emits, creatures roam...). Their chunk is kept awake
+    // while they're present so they never freeze mid-behavior.
+    var KEEPAWAKE = new Uint8Array(32);
+    [MAT.FIRE, MAT.LAVA, MAT.STEAM, MAT.GAS, MAT.NAPALM, MAT.PLANT, MAT.ICE,
+      MAT.SNOW, MAT.ACID, MAT.SEED, MAT.VIRUS, MAT.CLONE, MAT.TORCH, MAT.FAN,
+      MAT.ANT, MAT.BIRD, MAT.FIGHTER, MAT.LIGHTNING].forEach(function (m) {
+      KEEPAWAKE[m] = 1;
+    });
+
+    function wake(x, y) {
+      var cx = (x / CHUNK) | 0;
+      var cy = (y / CHUNK) | 0;
+      for (var ay = cy - 1; ay <= cy + 1; ay++) {
+        if (ay < 0 || ay >= cH) continue;
+        for (var ax = cx - 1; ax <= cx + 1; ax++) {
+          if (ax >= 0 && ax < cW) dirty[ay * cW + ax] = 1;
+        }
+      }
+    }
+
+    // Mark a cell as changed this frame AND wake its region for next frame.
+    function touch(i) {
+      moved[i] = 1;
+      wake(i % w, (i / w) | 0);
+    }
 
     // Electricity: charge state rides in life[] on conductors (metal/water/mercury).
     // WireWorld-style: 0 neutral, 2 head (live), 1 tail (refractory).
@@ -240,6 +281,7 @@
       } else {
         life[i] = 0;
       }
+      wake(x, y);
     }
 
     function clear() {
@@ -249,6 +291,9 @@
       windY.fill(0);
       hasCharge = false;
       chargeAge = 0;
+      windTtl = 0;
+      active.fill(0);
+      dirty.fill(0);
       clearVisualEvents();
     }
 
@@ -335,14 +380,14 @@
       var tl = life[i];
       life[i] = life[j];
       life[j] = tl;
-      moved[i] = 1;
-      moved[j] = 1;
+      touch(i);
+      touch(j);
     }
 
     function become(i, mat, lifeVal) {
       grid[i] = mat;
       life[i] = lifeVal || 0;
-      moved[i] = 1;
+      touch(i);
     }
 
     /** Move into empty space (or through gas) only. */
@@ -386,9 +431,9 @@
                 life[j] = life[i];
                 grid[i] = MAT.EMPTY;
                 life[i] = 0;
-                moved[i] = 1;
-                moved[j] = 1;
-                moved[side] = 1;
+                touch(i);
+                touch(j);
+                touch(side);
                 return true;
               }
               if (inBounds(sx2, ny - 1) && (grid[idx(sx2, ny - 1)] === MAT.EMPTY || M.isGas(grid[idx(sx2, ny - 1)]))) {
@@ -400,9 +445,9 @@
                 life[j] = life[i];
                 grid[i] = MAT.EMPTY;
                 life[i] = 0;
-                moved[i] = 1;
-                moved[j] = 1;
-                moved[sideUp] = 1;
+                touch(i);
+                touch(j);
+                touch(sideUp);
                 return true;
               }
               sdir = -sdir;
@@ -438,6 +483,7 @@
     function explode(cx, cy, r) {
       // Record for FX after we have the blast parameters (no RNG / no sim branch).
       pushVisualEvent({ type: "explosion", x: cx, y: cy, r: r });
+      windTtl = 60; // blast wind must reach settled particles in dormant chunks
       var r2 = r * r;
       var core = r2 >> 1;
       // Deferred ejecta: [fromX, fromY, mat] — placed after the fireball so paths are clear
@@ -730,7 +776,7 @@
         var ny = dirs[pick * 2 + 1];
         if (cellAt(nx, ny) === MAT.EMPTY) {
           setCell(nx, ny, life[i]);
-          moved[idx(nx, ny)] = 1;
+          touch(idx(nx, ny));
         }
       }
     }
@@ -743,6 +789,7 @@
       var c = (y >> 2) * wW + (x >> 2);
       windX[c] += d[0] * 1.2;
       windY[c] += d[1] * 1.2;
+      windTtl = 4; // refreshed every frame a fan runs; keeps downwind chunks awake
     }
 
     /** Ant crawls along surfaces, climbs, tunnels through soft materials. */
@@ -1414,6 +1461,7 @@
       var i = idx(x, y);
       if (moved[i]) return;
       var m = grid[i];
+      if (KEEPAWAKE[m]) wake(x, y); // self-acting materials never sleep
       switch (m) {
         case MAT.EMPTY:
         case MAT.WALL:
@@ -1472,6 +1520,7 @@
       var i = idx(x, y);
       if (moved[i]) return;
       var m = grid[i];
+      if (KEEPAWAKE[m]) wake(x, y); // fire/steam/gas keep their chunk awake
       if (m === MAT.FIRE) updateFire(x, y);
       else if (m === MAT.STEAM) updateSteam(x, y);
       else if (m === MAT.GAS) updateGas(x, y);
@@ -1482,23 +1531,62 @@
       frame++;
       moved.fill(0);
       stepWind();
+
+      // Rotate dirty-region buffers: this frame processes what was woken since
+      // the last step; wake() now accumulates into a fresh `dirty` for next time.
+      var t = active; active = dirty; dirty = t;
+      dirty.fill(0);
+      // Wind can push settled particles in otherwise-dormant chunks; while a fan
+      // or blast is live, keep any chunk with real wind awake this frame.
+      if (windTtl > 0) {
+        windTtl--;
+        for (var wy = 0; wy < wH; wy++) {
+          for (var wx = 0; wx < wW; wx++) {
+            var wc = wy * wW + wx;
+            if (Math.abs(windX[wc]) + Math.abs(windY[wc]) > 0.4) {
+              var ci = ((wy >> 3) * cW) + (wx >> 3);
+              active[ci] = 1;
+            }
+          }
+        }
+      }
+
       var ltr = (frame & 1) === 0; // alternate scan direction for fairness
 
-      // Bottom-up: powders, liquids, plants (gravity)
+      // Bottom-up: powders, liquids, plants (gravity). Skip dormant chunks but
+      // keep the global row order so gravity resolves exactly as before.
       for (var y = h - 1; y >= 0; y--) {
+        var base = ((y / CHUNK) | 0) * cW;
         if (ltr) {
-          for (var x = 0; x < w; x++) processCell(x, y);
+          for (var cx = 0; cx < cW; cx++) {
+            if (!active[base + cx]) continue;
+            var xs = cx * CHUNK, xe = xs + CHUNK; if (xe > w) xe = w;
+            for (var x = xs; x < xe; x++) processCell(x, y);
+          }
         } else {
-          for (var x2 = w - 1; x2 >= 0; x2--) processCell(x2, y);
+          for (var cx2 = cW - 1; cx2 >= 0; cx2--) {
+            if (!active[base + cx2]) continue;
+            var xs2 = cx2 * CHUNK, xe2 = xs2 + CHUNK; if (xe2 > w) xe2 = w;
+            for (var x2 = xe2 - 1; x2 >= xs2; x2--) processCell(x2, y);
+          }
         }
       }
 
       // Top-down: fire and steam (rise)
       for (var y2 = 0; y2 < h; y2++) {
+        var base2 = ((y2 / CHUNK) | 0) * cW;
         if (ltr) {
-          for (var x3 = 0; x3 < w; x3++) processGas(x3, y2);
+          for (var cx3 = 0; cx3 < cW; cx3++) {
+            if (!active[base2 + cx3]) continue;
+            var xs3 = cx3 * CHUNK, xe3 = xs3 + CHUNK; if (xe3 > w) xe3 = w;
+            for (var x3 = xs3; x3 < xe3; x3++) processGas(x3, y2);
+          }
         } else {
-          for (var x4 = w - 1; x4 >= 0; x4--) processGas(x4, y2);
+          for (var cx4 = cW - 1; cx4 >= 0; cx4--) {
+            if (!active[base2 + cx4]) continue;
+            var xs4 = cx4 * CHUNK, xe4 = xs4 + CHUNK; if (xe4 > w) xe4 = w;
+            for (var x4 = xe4 - 1; x4 >= xs4; x4--) processGas(x4, y2);
+          }
         }
       }
 
@@ -1808,6 +1896,8 @@
       hasCharge = false;
       chargeAge = 0;
       clearVisualEvents();
+      windTtl = 0;
+      dirty.fill(1); // re-scan the whole loaded scene next step
       for (var i = 0; i < grid.length; i++) {
         if (grid[i] === MAT.FIRE) life[i] = 30 + ((rand() * 30) | 0);
         else if (grid[i] === MAT.STEAM) life[i] = 90 + ((rand() * 60) | 0);
@@ -1846,6 +1936,13 @@
       getCell: getCell,
       setCell: setCell,
       loadGrid: loadGrid,
+      /** Chunks scheduled for processing next step (dirty-region debug/test). */
+      activeChunkCount: function () {
+        var c = 0;
+        for (var k = 0; k < dirty.length; k++) if (dirty[k]) c++;
+        return c;
+      },
+      chunkCount: cW * cH,
       /** Charge on a conductor cell (0 neutral, 1 tail, 2 head); 0 elsewhere. */
       getCharge: function (x, y) {
         if (!inBounds(x, y)) return 0;
