@@ -34,6 +34,7 @@ npm start
 | Pause | **Pause** button or `Space` |
 | Clear | **Clear** button or `C` |
 | Save PNG | **Save PNG** button or `S` |
+| Share scene | **Share** button — copies a link that restores the current grid (encoded in the URL) |
 
 ### Materials
 

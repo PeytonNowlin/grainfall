@@ -1016,6 +1016,22 @@ sim.setCell(10, 10, MAT.WALL);
 sim.paint(10, 10, MAT.EMPTY, 0, undefined, false);
 assertEqual(sim.getCell(10, 10), MAT.EMPTY, "erase clears cells even with overlap off");
 
+// --- loadGrid (save/load restore) ---
+console.log("\n[loadGrid]");
+(function () {
+  var s = Sim.createSim(16, 12);
+  s.setCell(3, 4, MAT.SAND);
+  s.setCell(5, 6, MAT.WATER);
+  s.setCell(0, 0, MAT.WALL);
+  var snap = Uint8Array.from(s.snapshot());
+  var s2 = Sim.createSim(16, 12);
+  assert(s2.loadGrid(snap) === true, "loadGrid accepts same-sized buffer");
+  assertEqual(s2.getCell(3, 4), MAT.SAND, "loadGrid restores sand cell");
+  assertEqual(s2.getCell(5, 6), MAT.WATER, "loadGrid restores water cell");
+  assertEqual(s2.getCell(0, 0), MAT.WALL, "loadGrid restores wall cell");
+  assert(s2.loadGrid(new Uint8Array(4)) === false, "loadGrid rejects wrong-sized buffer");
+})();
+
 // --- Summary ---
 console.log("\n=======================");
 console.log("Passed: " + passed + "  Failed: " + failed);

@@ -1765,11 +1765,32 @@
       return Array.from(grid);
     }
 
+    /**
+     * Replace the whole grid from a same-sized byte buffer (save/load).
+     * Resets transient state (life, wind, charge); regenerates fire/steam
+     * lifetimes so loaded flames don't burn forever or die instantly.
+     */
+    function loadGrid(src) {
+      if (!src || src.length !== grid.length) return false;
+      grid.set(src);
+      life.fill(0);
+      windX.fill(0);
+      windY.fill(0);
+      hasCharge = false;
+      chargeAge = 0;
+      for (var i = 0; i < grid.length; i++) {
+        if (grid[i] === MAT.FIRE) life[i] = 30 + ((rand() * 30) | 0);
+        else if (grid[i] === MAT.STEAM) life[i] = 90 + ((rand() * 60) | 0);
+      }
+      return true;
+    }
+
     return {
       width: w,
       height: h,
       getCell: getCell,
       setCell: setCell,
+      loadGrid: loadGrid,
       /** Charge on a conductor cell (0 neutral, 1 tail, 2 head); 0 elsewhere. */
       getCharge: function (x, y) {
         if (!inBounds(x, y)) return 0;

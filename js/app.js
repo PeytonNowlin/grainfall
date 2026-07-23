@@ -54,6 +54,7 @@
   var clearBtn = document.getElementById("btn-clear");
   var pauseBtn = document.getElementById("btn-pause");
   var saveBtn = document.getElementById("btn-save");
+  var shareBtn = document.getElementById("btn-share");
   var hintEl = document.getElementById("hint");
 
   if (!canvas || !paletteEl) {
@@ -537,6 +538,94 @@
     ctx.fillRect(-0.5, -0.5, 1, 1);
     ctx.restore();
   }
+
+  // --- Share links: RLE + base64url of the grid, carried in location.hash ---
+  // Format: "GF1:<W>x<H>:<base64url>". Run = material byte + LEB128 count.
+  // ponytail: grid only; transient life/wind/charge are rebuilt on load.
+  function encodeGrid(grid) {
+    var out = [];
+    var i = 0;
+    var n = grid.length;
+    while (i < n) {
+      var m = grid[i];
+      var run = 1;
+      while (i + run < n && grid[i + run] === m) run++;
+      out.push(m & 0xff);
+      var c = run;
+      while (c >= 0x80) { out.push((c & 0x7f) | 0x80); c >>>= 7; }
+      out.push(c);
+      i += run;
+    }
+    return out;
+  }
+
+  function decodeGrid(bytes, len) {
+    var out = new Uint8Array(len);
+    var oi = 0;
+    var i = 0;
+    while (i < bytes.length && oi < len) {
+      var m = bytes[i++];
+      var run = 0, shift = 0, b;
+      do { b = bytes[i++]; run |= (b & 0x7f) << shift; shift += 7; } while (b & 0x80 && i < bytes.length);
+      for (var k = 0; k < run && oi < len; k++) out[oi++] = m;
+    }
+    return oi === len ? out : null;
+  }
+
+  function bytesToB64url(bytes) {
+    var bin = "";
+    for (var i = 0; i < bytes.length; i += 8192) {
+      bin += String.fromCharCode.apply(null, bytes.slice(i, i + 8192));
+    }
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  }
+
+  function b64urlToBytes(s) {
+    var bin = atob(s.replace(/-/g, "+").replace(/_/g, "/"));
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  function shareLink() {
+    try {
+      var hash = "GF1:" + GRID_W + "x" + GRID_H + ":" + bytesToB64url(encodeGrid(sim.grid));
+      location.hash = hash;
+      var done = function (msg) {
+        if (!shareBtn) return;
+        var prev = shareBtn.textContent;
+        shareBtn.textContent = msg;
+        setTimeout(function () { shareBtn.textContent = prev; }, 1400);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(location.href).then(
+          function () { done("Copied!"); },
+          function () { done("Link in URL"); }
+        );
+      } else {
+        done("Link in URL");
+      }
+    } catch (e) {}
+  }
+
+  function loadFromHash() {
+    try {
+      var h = decodeURIComponent(location.hash.replace(/^#/, ""));
+      if (h.indexOf("GF1:") !== 0) return false;
+      var rest = h.slice(4);
+      var colon = rest.indexOf(":");
+      if (colon < 0) return false;
+      var dims = rest.slice(0, colon).split("x");
+      if ((parseInt(dims[0], 10) | 0) !== GRID_W || (parseInt(dims[1], 10) | 0) !== GRID_H) return false;
+      var grid = decodeGrid(b64urlToBytes(rest.slice(colon + 1)), GRID_W * GRID_H);
+      return grid ? sim.loadGrid(grid) : false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  if (shareBtn) shareBtn.addEventListener("click", shareLink);
+  loadFromHash();
 
   // Download the current grid as a PNG. Re-blits first so overlays (cursor
   // ring, shape preview) are excluded from the saved image.
