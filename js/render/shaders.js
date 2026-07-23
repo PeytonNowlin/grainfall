@@ -5,12 +5,15 @@
 (function (root) {
   "use strict";
 
+  // Clip-space quad. Flip V so uv (0,0) is top-left — matches sim grid /
+  // Canvas2D / ImageData (y grows downward). Without this, materials render
+  // upside-down relative to the overlay cursor and paint mapping.
   var VERT = [
     "#version 300 es",
     "in vec2 aPos;",
     "out vec2 vUv;",
     "void main(){",
-    "  vUv = aPos * 0.5 + 0.5;",
+    "  vUv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);",
     "  gl_Position = vec4(aPos, 0.0, 1.0);",
     "}",
   ].join("\n");

@@ -134,14 +134,19 @@
       w = h * aspect;
     }
     var dpr = window.devicePixelRatio || 1;
-    renderer.resize(w, h, dpr);
+    var cssW = Math.floor(w);
+    var cssH = Math.floor(h);
+    renderer.resize(cssW, cssH, dpr);
+    // Keep display + overlay on the exact same CSS box so cursor == paint.
+    canvas.style.width = cssW + "px";
+    canvas.style.height = cssH + "px";
     if (overlay) {
-      overlay.style.width = Math.floor(w) + "px";
-      overlay.style.height = Math.floor(h) + "px";
+      overlay.style.width = cssW + "px";
+      overlay.style.height = cssH + "px";
     }
     if (stageStack) {
-      stageStack.style.width = Math.floor(w) + "px";
-      stageStack.style.height = Math.floor(h) + "px";
+      stageStack.style.width = cssW + "px";
+      stageStack.style.height = cssH + "px";
     }
   }
   sizeCanvas();

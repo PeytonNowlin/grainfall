@@ -454,7 +454,6 @@
         var bloomTex = src.colors[0].tex;
 
         // Composite
-        var shake = effects.getShake();
         gl.bindFramebuffer(gl.FRAMEBUFFER, fboComposite.fbo);
         gl.viewport(0, 0, w, h);
         gl.useProgram(programs.composite.program);
@@ -473,7 +472,9 @@
         GL.setUniform1f(gl, programs.composite.uniforms.uReducedMotion, reducedMotion ? 1 : 0);
         GL.setUniform1f(gl, programs.composite.uniforms.uVignette, quality.vignette);
         GL.setUniform1f(gl, programs.composite.uniforms.uGrain, quality.grain);
-        GL.setUniform2f(gl, programs.composite.uniforms.uShake, shake.x, shake.y);
+        // Shake is applied via CSS on the stage stack so the overlay cursor
+        // stays locked to the pixels; do not also offset UVs here.
+        GL.setUniform2f(gl, programs.composite.uniforms.uShake, 0, 0);
         GL.bindTextureUnit(gl, 0, sceneTex);
         GL.bindTextureUnit(gl, 1, bloomTex);
         GL.bindTextureUnit(gl, 2, thermalTex);

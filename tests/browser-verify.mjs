@@ -172,7 +172,7 @@ async function runOnce(browser, baseUrl, lines, tag, viewport) {
   );
   if (hotScene.lava + hotScene.fire < 1) throw new Error("Hot scene failed to place materials");
 
-  // Pointer mapping corners
+  // Pointer mapping corners + paint/readback orientation (WebGL must not be Y-flipped)
   const mapping = await page.evaluate(() => {
     const app = window.GrainfallApp;
     const el = app.overlay || app.canvas;
@@ -180,10 +180,31 @@ async function runOnce(browser, baseUrl, lines, tag, viewport) {
     const tl = app.clientToGrid(rect.left + 1, rect.top + 1);
     const br = app.clientToGrid(rect.right - 1, rect.bottom - 1);
     const mid = app.clientToGrid(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    return { tl, br, mid, gridW: app.GRID_W, gridH: app.GRID_H };
+
+    // Place a unique marker near the top of the grid and confirm renderTo
+    // (CPU, y-down) still matches where the app thinks "top" is after WebGL.
+    const MAT = window.Materials.MAT;
+    app.sim.clear();
+    app.renderer.resetTemporal();
+    app.sim.setCell(10, 5, MAT.SAND);
+    app.sim.setCell(10, app.GRID_H - 6, MAT.WATER);
+    const g = app.clientToGrid(
+      rect.left + (10.5 / app.GRID_W) * rect.width,
+      rect.top + (5.5 / app.GRID_H) * rect.height
+    );
+    return {
+      tl,
+      br,
+      mid,
+      gridW: app.GRID_W,
+      gridH: app.GRID_H,
+      mappedTop: g,
+      topCell: app.sim.getCell(10, 5),
+      bottomCell: app.sim.getCell(10, app.GRID_H - 6),
+    };
   });
   log(
-    `[${tag}] map tl=${mapping.tl.x},${mapping.tl.y} mid=${mapping.mid.x},${mapping.mid.y} br=${mapping.br.x},${mapping.br.y}`,
+    `[${tag}] map tl=${mapping.tl.x},${mapping.tl.y} mid=${mapping.mid.x},${mapping.mid.y} br=${mapping.br.x},${mapping.br.y} topMap=${mapping.mappedTop.x},${mapping.mappedTop.y}`,
     lines
   );
   if (mapping.tl.x > 2 || mapping.tl.y > 2) throw new Error("Top-left mapping wrong");
@@ -191,6 +212,12 @@ async function runOnce(browser, baseUrl, lines, tag, viewport) {
     throw new Error("Bottom-right mapping wrong");
   }
   if (Math.abs(mapping.mid.x - (mapping.gridW / 2 | 0)) > 4) throw new Error("Mid X mapping wrong");
+  if (Math.abs(mapping.mappedTop.x - 10) > 1 || Math.abs(mapping.mappedTop.y - 5) > 1) {
+    throw new Error("Overlay mapping does not hit expected top-grid cell");
+  }
+  if (mapping.topCell !== 2 || mapping.bottomCell !== 3) {
+    throw new Error("Grid orientation markers missing");
+  }
 
   // Water paint via API
   const waterChange = await page.evaluate(() => {
